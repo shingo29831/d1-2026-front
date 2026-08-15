@@ -1,0 +1,39 @@
+# 子供見守りシステム - 公開用Webサーバー(Caddy)設定
+#
+# ・{$DOMAIN} … docker-compose.yml / .env の DOMAIN で指定した値。
+#     - "http://localhost" (既定値) … ローカル/LAN内での動作確認用。プレーンなHTTPで待ち受ける。
+#     - "example.com" のように実際のドメイン名を指定すると、Caddyが自動で
+#       Let's EncryptからHTTPS証明書を取得・更新する(スキームは付けないこと)。
+# ・/socket.io/ 以下へのアクセスは、見守りサーバー(server:3001)へ中継します。
+#   これによりブラウザは常に1つのオリジン(このCaddy)としか通信しないため、
+#   クライアント側は SOCKET_SERVER_URL を空にするだけで動作します(CORS設定も不要)。
+#
+# 【重要・公開前に必ずご確認ください】
+# 現状このままdocker composeを起動すると、認証なしで誰でも見守り映像・通知にアクセスできてしまいます。
+# 本当にインターネットへ公開する場合は、下記のbasicauthブロックのコメントを外し、
+# ユーザー名とパスワードハッシュを設定することを強く推奨します。
+# ハッシュの生成方法:
+#   docker run --rm caddy:2-alpine caddy hash-password --plaintext "設定したいパスワード"
+# 生成された文字列を .env の BASIC_AUTH_HASH に設定してください。
+
+{$DOMAIN}
+
+encode gzip zstd
+
+# --- ベーシック認証(公開時は有効化を推奨) ---
+# basicauth {
+# 	{$BASIC_AUTH_USER} {$BASIC_AUTH_HASH}
+# }
+
+# handleブロックで明示的に振り分ける(順番通りに評価され、最初に一致した1つだけが実行される)。
+# こうしないと、下のtry_filesが先に/socket.ioへのリクエストを/index.htmlへ書き換えてしまい、
+# reverse_proxyに一切届かなくなってしまう。
+handle /socket.io/* {
+	reverse_proxy server:3001
+}
+
+handle {
+	root * /srv
+	file_server
+	try_files {path} /index.html
+}
