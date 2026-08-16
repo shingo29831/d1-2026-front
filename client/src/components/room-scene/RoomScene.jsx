@@ -8,6 +8,8 @@ import PersonFigure from '../dashboard/PersonFigure';
 import DangerZoneMarkers from './DangerZoneMarkers';
 import DoorSensorMarkers from './DoorSensorMarkers';
 import CameraMount from './CameraMount';
+import HeatmapOverlay3D from './HeatmapOverlay3D';
+import Canvas3DErrorBoundary from './Canvas3DErrorBoundary';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds } from '../../roomShapes';
@@ -49,10 +51,13 @@ export default function RoomScene({
   previewCameraYawDeg,
   previewCameraPitchDeg,
   previewCameraFovDeg,
+  previewCameraRangeM,
   previewFurniture,
   previewZones,
   previewDoorSensors,
   solidWalls,
+  showHeatmap,
+  heatmapIncidents,
 }) {
   const {
     footprint: ctxFootprint,
@@ -147,6 +152,9 @@ export default function RoomScene({
   const gridDivisions = Math.max(4, Math.round(gridSize * 2));
 
   return (
+    // Canvas(WebGL)内で何らかの例外が起きても画面全体が真っ白にならないよう、
+    // この3D表示部分だけを局所的に受け止めるエラー境界で包む。
+    <Canvas3DErrorBoundary>
     <Canvas shadows camera={{ position: overviewCamera.position, fov: overviewCamera.fov }}>
       {/* 背景色をテーマに合わせた明るめの色にし、遠景フォグは使わない。
           以前は黒に近い背景色+濃いフォグの組み合わせのため、俯瞰視点で
@@ -180,6 +188,7 @@ export default function RoomScene({
         yawDeg={previewCameraYawDeg}
         pitchDeg={previewCameraPitchDeg}
         fovDeg={previewCameraFovDeg}
+        rangeM={previewCameraRangeM}
       />
 
       <DangerZoneMarkers peopleFloors={list.map((p) => p.floor)} zones={zones} />
@@ -196,9 +205,19 @@ export default function RoomScene({
         />
       ))}
 
+      {/* 「見守りダッシュボードにもヒートマップを表示できるボタンがほしい」という
+          要望を受けて追加した、危険行為の履歴に基づく発生密度ヒートマップの重ね
+          表示。「危険行為の履歴」タブの3Dヒートマップと同じ計算(incidentHeatmap.js)
+          を使う。既定では非表示で、StatusBarの「ヒートマップ」ボタンを押した
+          ときだけ表示する(showHeatmap)。 */}
+      {showHeatmap && (
+        <HeatmapOverlay3D incidents={heatmapIncidents} footprint={footprint} />
+      )}
+
       <gridHelper args={[gridSize, gridDivisions, theme.sceneGrid1, theme.sceneGrid2]} position={[0, 0.001, 0]} />
 
       <CameraRig viewMode={viewMode} overviewCamera={overviewCamera} povCamera={povCamera} />
     </Canvas>
+    </Canvas3DErrorBoundary>
   );
 }

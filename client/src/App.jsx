@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { getCurrentUser, signOut } from 'aws-amplify/auth';
+import { signOut } from 'aws-amplify/auth';
 import AppHeader, { HEADER_HEIGHT } from './components/layout/AppHeader';
 import MonitoringDashboard from './components/dashboard/MonitoringDashboard';
 import YoloCheckPage from './components/diagnostics/YoloCheckPage';
@@ -14,18 +14,21 @@ import HistoryPage from './components/history/HistoryPage';
 import ConnectionStatusPage from './components/connection-status/ConnectionStatusPage';
 import LoginPage from './components/auth/LoginPage';
 import VersionBadge from './components/layout/VersionBadge';
+import PageErrorBoundary from './components/layout/PageErrorBoundary';
 import { useDetectionPipeline } from './hooks/useDetectionPipeline';
 import { useMonitoringAlerts } from './hooks/useMonitoringAlerts';
 import { RoomConfigProvider } from './roomConfigContext';
 import { ThemeProvider, useTheme } from './themeContext';
-import { isCognitoConfigured } from './amplifyConfig';
 
-const AUTH_KEY = 'system1.auth.v1';
-const AUTH_EMAIL_KEY = 'system1.auth.email.v1';
-// ログイン方式('cognito'=実際のAmazon Cognito / 'mock'=Cognito未接続時 or
-// 「ゲストとして続ける」でのデモ用ログイン)。ログアウト時にAmplifyの`signOut()`を
-// 呼ぶべきかどうかの判定に使う。
-const AUTH_MODE_KEY = 'system1.auth.mode.v1';
+// 【重要】以前はここでログイン状態をlocalStorageに保存し、ブラウザを閉じても
+// ログインしたままになる「ログイン状態を保持する」機能があったが、「サイトを
+// 開いたら必ずログイン画面から始まるようにしてほしい」との要望を受けて廃止した。
+// 家族共有のタブレットなどで、誰が開いてもダッシュボードがそのまま見えてしまう
+// のを避けたい、という利用シーンを想定している。そのため、このファイルでは
+// 認証状態をReactのstateのみで保持し(ページを再読み込みすれば消える)、
+// localStorageへは一切書き込まない。旧バージョンで保存された古いキーが
+// 残っている場合に備えて、起動時に一度だけ掃除しておく(下のuseEffect参照)。
+const LEGACY_AUTH_KEYS = ['system1.auth.v1', 'system1.auth.email.v1', 'system1.auth.mode.v1'];
 
 // ===================================================================
 // アプリ全体のシェル。
@@ -34,11 +37,13 @@ const AUTH_MODE_KEY = 'system1.auth.mode.v1';
 // このコンポーネント(Root)が仕様書 Step 1「Cognito認証(ログインUI)」の
 // 「ルーティングを保護し、未ログイン時はダッシュボードへのアクセスを弾き
 // ログイン画面へリダイレクトさせる」に対応する認証ゲートを担う。
-// client/.env にCognitoの環境変数が設定されている場合は、起動時に
-// Amplifyの`getCurrentUser()`で既存のCognitoセッション(トークン)の
-// 有無を確認し、有効なセッションがあれば自動的にログイン状態にする。
-// 環境変数が未設定の場合は、従来通りlocalStorageの認証フラグによる
-// モック実装にフォールバックする(詳細はROLE_C_SPEC_ALIGNMENT.md参照)。
+// 【重要】「サイトを開いたら必ずログイン画面から始まるようにしてほしい」との
+// 要望を受け、以前あった自動ログイン(Cognitoの既存セッションを起動時に
+// 確認して自動的にログイン状態にする挙動、およびlocalStorageに保存した
+// モック認証フラグによる自動ログイン)は廃止した。client/.env にCognitoの
+// 環境変数が設定されている場合でも、ページを開いた直後は必ずログイン画面を
+// 表示し、フォーム送信(または「ゲストとして続ける」)を経て初めてログイン
+// 状態になる(詳細はROLE_C_SPEC_ALIGNMENT.md参照)。
 //
 // ・検出パイプライン(Webカメラ/動画 → YOLO → pose-data)はここで一元管理し、
 //   どのページを表示していても止まらないようにする。
@@ -57,14 +62,15 @@ const AUTH_MODE_KEY = 'system1.auth.mode.v1';
 //     4. 家具の設定            … 家具(箱)を間取り図上で自由に配置(以前は「家具・エリアの設定」として1画面だったが分割)
 //     5. エリアの設定          … 危険/注意エリアを間取り図上で自由に配置(同上)
 //     6. 開閉センサーの設定    … 玄関・勝手口などの開閉センサー(仕様書のsensor_type:"door")を間取り図上に配置
-//     7. 危険行為の履歴        … 転倒・危険エリア侵入の履歴一覧とヒートマップ(仕様書Step 5)
+//     7. 危険行為の履歴        … 転倒・危険エリアへの接近の履歴一覧とヒートマップ(仕様書Step 5)
 //     8. YOLOの起動・動作確認  … Webカメラ/動画・2Dオーバーレイ・生データ確認
 //     9. Polycamの動作確認     … スキャンしたGLTF/GLBの読み込み確認、間取り図画像の確認
 //
 // 【重要】ログイン画面(LoginPage)は家庭内利用向けのプロトタイプのため、実際の
-// 認証は行っていない。メールアドレス・パスワードを入力するUIはあるが、
-// 「ログイン」ボタンを押すと入力内容に関わらず常にログインが成功する。
-// ログイン状態はlocalStorageに保存し、ブラウザを閉じても保持される。
+// 認証は行っていない(Cognito未接続時)。メールアドレス・パスワードを入力する
+// UIはあるが、「ログイン」ボタンを押すと入力内容に関わらず常にログインが
+// 成功する。ログイン状態はReactのstateのみで保持し、ページの再読み込みや
+// ブラウザを閉じて開き直すと必ずログイン画面からやり直しになる(上記参照)。
 //
 // 【画面切り替え時のパフォーマンス】以前は全ページを常時マウントしたまま
 // CSSのdisplay:none/blockで切り替えていたが、部屋の3Dプレビュー(RoomScene)を
@@ -92,63 +98,50 @@ export default function App() {
 }
 
 function Root() {
-  const [authed, setAuthed] = useState(() => {
-    try { return window.localStorage.getItem(AUTH_KEY) === '1'; } catch { return false; }
-  });
-  const [userEmail, setUserEmail] = useState(() => {
-    try { return window.localStorage.getItem(AUTH_EMAIL_KEY) || ''; } catch { return ''; }
-  });
-  const [authMode, setAuthMode] = useState(() => {
-    try { return window.localStorage.getItem(AUTH_MODE_KEY) || 'mock'; } catch { return 'mock'; }
-  });
-  // Cognitoの既存セッション確認が終わるまでの一瞬だけ、ログイン画面の
-  // ちらつき(一瞬ログイン画面→すぐダッシュボード)を防ぐための状態。
-  const [checkingSession, setCheckingSession] = useState(isCognitoConfigured);
+  // 認証状態はReactのstateのみで管理する(localStorageには保存しない)。
+  // そのため、ページの再読み込みや新しいタブでの起動では必ずfalseから始まり、
+  // ログイン画面が表示される。
+  const [authed, setAuthed] = useState(false);
+  const [userEmail, setUserEmail] = useState('');
+  // ログイン方式('cognito'=実際のAmazon Cognito / 'mock'=Cognito未接続時 or
+  // 「ゲストとして続ける」でのデモ用ログイン)。ログアウト時にAmplifyの`signOut()`を
+  // 呼ぶべきかどうかの判定に使う。
+  const [authMode, setAuthMode] = useState('mock');
 
-  // 起動時、Cognitoが設定されていれば既存のログインセッション(Amplifyが
-  // localStorageに保持しているトークン)が有効かどうかを確認する。
-  // 有効なセッションがあれば、ログイン画面を経由せず自動的にダッシュボードへ入る。
+  // 起動時に一度だけ、旧バージョンがlocalStorageへ保存していた認証フラグが
+  // 残っていれば削除しておく(自動ログインが復活してしまわないようにするため)。
   useEffect(() => {
-    if (!isCognitoConfigured) return undefined;
-    let cancelled = false;
-    (async () => {
-      try {
-        const user = await getCurrentUser();
-        if (cancelled) return;
-        setUserEmail(user?.signInDetails?.loginId || user?.username || '');
-        setAuthMode('cognito');
-        setAuthed(true);
-      } catch {
-        // 有効なセッションが無ければ、これまで通りログイン画面を表示する
-        // (localStorageのモックフラグが残っていた場合は不整合なので消しておく)。
-        if (!cancelled) {
-          try { window.localStorage.removeItem(AUTH_KEY); } catch { /* noop */ }
-        }
-      } finally {
-        if (!cancelled) setCheckingSession(false);
-      }
-    })();
-    return () => { cancelled = true; };
+    try {
+      LEGACY_AUTH_KEYS.forEach((key) => window.localStorage.removeItem(key));
+    } catch { /* noop */ }
   }, []);
 
-  const handleLogin = (payload, remember) => {
+  // 【重要・バグ修正】「サイトを開いたら必ずログイン画面から始まる」ようにするため、
+  // このアプリ側の認証状態(authed)はReactのstateのみで管理し、ページ再読み込みの
+  // たびに必ずfalseから始まる。しかし、Amplify(aws-amplify/auth)自体は既定で
+  // ログイン済みセッションをブラウザのlocalStorageに保持し続けるため、以前
+  // ログインしたことがある端末では「アプリ側は未ログイン扱いなのに、Amplify内部は
+  // まだログイン済みだと思っている」という状態がずれたまま残ってしまっていた。
+  // この状態でログインフォームからCognitoに再度signIn()しようとすると、
+  // Amplifyが `UserAlreadyAuthenticatedException`(「既にログイン済みのセッションが
+  // 残っています。一度ページを再読み込みしてからお試しください」)を投げてログインが
+  // 失敗する不具合があった(再読み込みしても、Amplify側のセッションはlocalStorageに
+  // 残ったままのため、実際には解決しないケースがあった)。
+  // 対策として、ログイン画面に到達した(=起動直後、まだ未ログイン)タイミングで
+  // Amplify側の古いセッションも明示的に破棄しておく。これにより、アプリ側の
+  // 「毎回ログイン画面から始まる」という仕様と、Amplify側のセッション状態を
+  // 常に一致させ、上記の衝突エラーが起きないようにする(失敗しても画面には
+  // 影響しないよう握りつぶす。Cognito未設定環境では何も起きない)。
+  useEffect(() => {
+    signOut().catch(() => { /* noop */ });
+  }, []);
+
+  const handleLogin = (payload) => {
     const email = payload?.email || '';
     const mode = payload?.mode || 'mock';
     setUserEmail(email);
     setAuthMode(mode);
     setAuthed(true);
-    // 「ログイン状態を保持する」のチェックが外れている場合はlocalStorageに書かず、
-    // このタブのメモリ上だけでログイン状態を保持する(再読み込みすると再度ログインが必要)。
-    // ただし実際のCognitoログイン(mode==='cognito')の場合、Amplify自身が
-    // トークンをlocalStorageに保存する仕様のため、このチェックに関わらず
-    // 次回起動時は上のuseEffectで自動的に再ログインされる。
-    if (remember) {
-      try {
-        window.localStorage.setItem(AUTH_KEY, '1');
-        window.localStorage.setItem(AUTH_EMAIL_KEY, email || '');
-        window.localStorage.setItem(AUTH_MODE_KEY, mode);
-      } catch { /* 保存できなくても致命的ではないため無視 */ }
-    }
   };
 
   const handleLogout = () => {
@@ -158,43 +151,12 @@ function Root() {
       signOut().catch(() => { /* noop */ });
     }
     setAuthed(false);
-    try {
-      window.localStorage.removeItem(AUTH_KEY);
-      window.localStorage.removeItem(AUTH_EMAIL_KEY);
-      window.localStorage.removeItem(AUTH_MODE_KEY);
-    } catch { /* noop */ }
   };
 
-  if (checkingSession) {
-    // Cognitoの既存セッション確認中(通常は一瞬で終わる)。ログイン画面が
-    // 一瞬だけ表示されてすぐダッシュボードに切り替わる「ちらつき」を防ぐための
-    // ごく簡易な待機表示。
-    return <SessionCheckingScreen />;
-  }
   if (!authed) {
     return <LoginPage onLogin={handleLogin} />;
   }
   return <AppShell userEmail={userEmail} authMode={authMode} onLogout={handleLogout} />;
-}
-
-function SessionCheckingScreen() {
-  const { theme } = useTheme();
-  return (
-    <div
-      style={{
-        minHeight: '100vh',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: theme.pageBg,
-        color: theme.textFaint,
-        fontFamily: 'sans-serif',
-        fontSize: 13,
-      }}
-    >
-      ログイン状態を確認しています…
-    </div>
-  );
 }
 
 function AppShell({ userEmail, authMode, onLogout }) {
@@ -224,7 +186,7 @@ function AppShell({ userEmail, authMode, onLogout }) {
     requestWebcam,
   } = useDetectionPipeline();
 
-  // 転倒検知・危険エリア侵入・開閉センサーの通知などの評価は、ここ(常時マウントの
+  // 転倒検知・危険エリアへの接近・開閉センサーの通知などの評価は、ここ(常時マウントの
   // AppShell)で行う。以前は見守りダッシュボード側で呼び出していたため、他の設定
   // タブを見ている間は評価そのものが止まってしまっていた(「今表示しているページ
   // だけをマウントする」というパフォーマンス対策の副作用。詳細はMonitoringDashboard.jsx
@@ -270,61 +232,66 @@ function AppShell({ userEmail, authMode, onLogout }) {
           Three.jsの3Dプレビューを持つページが同時にいくつも裏側で描画ループを
           回し続け、画面切り替え時に固まって見える原因になっていた)。 */}
       <div style={{ position: 'fixed', top: HEADER_HEIGHT, left: 0, right: 0, bottom: 0, overflow: 'auto' }}>
-        {page === 'dashboard' && (
-          <div style={{ height: '100%' }}>
-            <MonitoringDashboard
+        {/* ページ単位のエラー境界。resetKeyにpage(表示中のページ名)を渡すことで、
+            あるページの表示中に何らかの例外が起きても、メニューから別のページへ
+            移動→戻ってくれば自動的に再挑戦できるようにしている。 */}
+        <PageErrorBoundary resetKey={page}>
+          {page === 'dashboard' && (
+            <div style={{ height: '100%' }}>
+              <MonitoringDashboard
+                connected={connected}
+                poseData={poseData}
+                lastPoseAt={lastPoseAt}
+                inputMode={inputMode}
+                shouldCapture={shouldCapture}
+                cameraError={cameraError}
+                requestWebcam={requestWebcam}
+                {...monitoringAlerts}
+              />
+            </div>
+          )}
+
+          {page === 'roomSetup' && <RoomSetupPage />}
+
+          {page === 'cameraSetup' && <CameraSetupPage />}
+
+          {page === 'furnitureSetup' && <FurnitureSetupPage />}
+
+          {page === 'zoneSetup' && <ZoneSetupPage />}
+
+          {page === 'doorSensorSetup' && <DoorSensorSetupPage />}
+
+          {page === 'history' && <HistoryPage />}
+
+          {page === 'connectionStatus' && (
+            <ConnectionStatusPage
+              authMode={authMode}
+              userEmail={userEmail}
+              connected={connected}
+              cameraError={cameraError}
+              shouldCapture={shouldCapture}
+              requestWebcam={requestWebcam}
+              lastPoseAt={lastPoseAt}
+            />
+          )}
+
+          {page === 'yolo' && (
+            <YoloCheckPage
+              registerVideoSlot={setVideoSlot}
+              fileInputRef={fileInputRef}
+              inputMode={inputMode}
+              handleFileChange={handleFileChange}
               connected={connected}
               poseData={poseData}
               lastPoseAt={lastPoseAt}
-              inputMode={inputMode}
               shouldCapture={shouldCapture}
               cameraError={cameraError}
               requestWebcam={requestWebcam}
-              {...monitoringAlerts}
             />
-          </div>
-        )}
+          )}
 
-        {page === 'roomSetup' && <RoomSetupPage />}
-
-        {page === 'cameraSetup' && <CameraSetupPage />}
-
-        {page === 'furnitureSetup' && <FurnitureSetupPage />}
-
-        {page === 'zoneSetup' && <ZoneSetupPage />}
-
-        {page === 'doorSensorSetup' && <DoorSensorSetupPage />}
-
-        {page === 'history' && <HistoryPage />}
-
-        {page === 'connectionStatus' && (
-          <ConnectionStatusPage
-            authMode={authMode}
-            userEmail={userEmail}
-            connected={connected}
-            cameraError={cameraError}
-            shouldCapture={shouldCapture}
-            requestWebcam={requestWebcam}
-            lastPoseAt={lastPoseAt}
-          />
-        )}
-
-        {page === 'yolo' && (
-          <YoloCheckPage
-            registerVideoSlot={setVideoSlot}
-            fileInputRef={fileInputRef}
-            inputMode={inputMode}
-            handleFileChange={handleFileChange}
-            connected={connected}
-            poseData={poseData}
-            lastPoseAt={lastPoseAt}
-            shouldCapture={shouldCapture}
-            cameraError={cameraError}
-            requestWebcam={requestWebcam}
-          />
-        )}
-
-        {page === 'polycam' && <PolycamCheckPage />}
+          {page === 'polycam' && <PolycamCheckPage />}
+        </PageErrorBoundary>
       </div>
     </div>
   );

@@ -1,7 +1,9 @@
 import React, { Suspense, useMemo } from 'react';
+import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import PlaceholderRoom from '../room-scene/PlaceholderRoom';
+import Canvas3DErrorBoundary from '../room-scene/Canvas3DErrorBoundary';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds, pointInPolygon } from '../../roomShapes';
@@ -43,7 +45,10 @@ function aggregateCells(incidents, footprint, bounds) {
     // 位置が概算(部屋の中心)の項目は、実際の発生位置ではないため場所別の
     // 集計には含めない(2Dヒートマップと同じ方針。含めると実データが増える
     // ほど部屋の中心に実態と異なる「ホットスポット」が出てしまうため)。
-    if (inc.approx) return;
+    if (!inc || inc.approx) return;
+    // 位置がNaN・Infinityなど不正な値の履歴は集計マス目のキーが壊れる
+    // (Map上で"NaN_NaN"のような不正なキーに紐づいてしまう)ため明示的に除外する。
+    if (!Number.isFinite(inc.x) || !Number.isFinite(inc.z)) return;
     const cx = Math.floor((inc.x - bounds.minX) / CELL_M);
     const cz = Math.floor((inc.z - bounds.minZ) / CELL_M);
     const key = `${cx}_${cz}`;
@@ -57,6 +62,30 @@ function aggregateCells(incidents, footprint, bounds) {
     cellsMap.get(key).count += 1;
   });
   return Array.from(cellsMap.values()).filter((c) => pointInPolygon(c.x, c.z, footprint));
+}
+
+// 家具は、3D棒グラフでは棒の高さ比較の邪魔にならないよう、立体の箱ではなく
+// 床に敷いた色付きの平面(2D)として表示する(「家具は立体にしないで2Dに
+// 色だけ配色してほしい」という要望への対応)。位置(x, z)・サイズ(width, depth)・
+// 回転(rotationDeg)・色はPlaceholderRoomの3D家具描画と同じ値をそのまま使う。
+function FlatFurniture({ item }) {
+  const width = item.width || 0.6;
+  const depth = item.depth || 0.5;
+  return (
+    <mesh
+      position={[item.x, 0.008, item.z]}
+      rotation={[-Math.PI / 2, 0, -THREE.MathUtils.degToRad(item.rotationDeg || 0)]}
+    >
+      <planeGeometry args={[width, depth]} />
+      <meshStandardMaterial
+        color={item.color || '#8b6b47'}
+        roughness={0.9}
+        transparent
+        opacity={0.75}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
 }
 
 function Bar({ cell, maxCount }) {
@@ -91,8 +120,9 @@ function Bar({ cell, maxCount }) {
 // incidents: HistoryPage側で絞り込み済みの履歴一覧をそのまま渡す
 // (カテゴリ・エリア・期間・キーワードの絞り込みが3D棒グラフにも即反映される)。
 export default function IncidentBarChart3D({ incidents }) {
-  const { footprint, height } = useRoomConfig();
+  const { footprint, height, furniture } = useRoomConfig();
   const { theme } = useTheme();
+  const furnitureList = Array.isArray(furniture) ? furniture : [];
 
   const list = Array.isArray(incidents) ? incidents : [];
   const bounds = useMemo(() => footprintBounds(footprint), [footprint]);
@@ -109,30 +139,40 @@ export default function IncidentBarChart3D({ incidents }) {
   const gridDivisions = Math.max(4, Math.round(gridSize * 2));
 
   return (
-    <Canvas shadows camera={{ position: camPos, fov: 45 }}>
-      <color attach="background" args={[theme.sceneBg]} />
-      <hemisphereLight args={[theme.sceneHemiSky, theme.sceneHemiGround, theme.sceneAmbient]} />
-      <directionalLight
-        position={[3, 6, 2]}
-        intensity={theme.mode === 'dark' ? 1.1 : 0.9}
-        castShadow
-        shadow-mapSize={[1024, 1024]}
-      />
-      <directionalLight position={[-3, 2, -2]} intensity={0.3} color={theme.mode === 'dark' ? '#3366ff' : '#aecdff'} />
+    // Canvas(WebGL)内で何らかの例外が起きても画面全体が真っ白にならないよう、
+    // この3D表示部分だけを局所的に受け止めるエラー境界で包む。
+    <Canvas3DErrorBoundary>
+      <Canvas shadows camera={{ position: camPos, fov: 45 }}>
+        <color attach="background" args={[theme.sceneBg]} />
+        <hemisphereLight args={[theme.sceneHemiSky, theme.sceneHemiGround, theme.sceneAmbient]} />
+        <directionalLight
+          position={[3, 6, 2]}
+          intensity={theme.mode === 'dark' ? 1.1 : 0.9}
+          castShadow
+          shadow-mapSize={[1024, 1024]}
+        />
+        <directionalLight position={[-3, 2, -2]} intensity={0.3} color={theme.mode === 'dark' ? '#3366ff' : '#aecdff'} />
 
-      {/* 「壁を透明にして棒を見やすく」の要望に合わせ、壁はほぼ透明(輪郭線だけが
-          薄く見える程度)で表示する。各設定タブのプレビュー用solidWallsより
-          さらに薄いwallOpacityを明示的に指定している。 */}
-      <Suspense fallback={null}>
-        <PlaceholderRoom wallOpacity={0.06} />
-      </Suspense>
+        {/* 「壁を透明にして棒を見やすく」の要望に合わせ、壁はほぼ透明(輪郭線だけが
+            薄く見える程度)で表示する。各設定タブのプレビュー用solidWallsより
+            さらに薄いwallOpacityを明示的に指定している。furniture={[]}を渡して
+            PlaceholderRoom自体には家具を描かせず(立体の箱にしない)、下の
+            FlatFurnitureで平面の色だけの表示に差し替える。 */}
+        <Suspense fallback={null}>
+          <PlaceholderRoom wallOpacity={0.06} furniture={[]} />
+        </Suspense>
 
-      {cells.map((c) => (
-        <Bar key={`${c.x}_${c.z}`} cell={c} maxCount={maxCount} />
-      ))}
+        {furnitureList.map((f) => (
+          <FlatFurniture key={f.id} item={f} />
+        ))}
 
-      <gridHelper args={[gridSize, gridDivisions, theme.sceneGrid1, theme.sceneGrid2]} position={[0, 0.001, 0]} />
-      <OrbitControls enableDamping dampingFactor={0.1} minDistance={0.8} maxDistance={24} />
-    </Canvas>
+        {cells.map((c) => (
+          <Bar key={`${c.x}_${c.z}`} cell={c} maxCount={maxCount} />
+        ))}
+
+        <gridHelper args={[gridSize, gridDivisions, theme.sceneGrid1, theme.sceneGrid2]} position={[0, 0.001, 0]} />
+        <OrbitControls enableDamping dampingFactor={0.1} minDistance={0.8} maxDistance={24} />
+      </Canvas>
+    </Canvas3DErrorBoundary>
   );
 }

@@ -122,7 +122,11 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
       <h2 style={s.h2}>{title}</h2>
       <p style={s.lead}>{lead}</p>
 
+      {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
+          左列=間取り図(2D。クリック/ドラッグでの追加・移動もここで行う)、
+          中央列=3Dプレビュー、右列=一覧(各項目の詳細設定)。 */}
       <div style={s.grid}>
+        <div style={s.col}>
         <section style={s.card}>
           <p style={s.desc}>
             {selectedId
@@ -228,7 +232,9 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
             </div>
           )}
         </section>
+        </div>
 
+        <div style={s.col}>
         <section style={s.card}>
           <h3 style={s.h3}>3Dプレビュー</h3>
           <p style={s.desc}>配置・編集した内容は保存操作なしですぐにここと見守りダッシュボードに反映されます。</p>
@@ -236,9 +242,9 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
             <RoomScene viewMode="overview" people={[]} solidWalls />
           </div>
         </section>
-      </div>
+        </div>
 
-      <div style={s.listGrid}>
+        <div style={s.col}>
         <section style={s.card}>
           <h3 style={s.h3}>{icon} {title.replace('の設定', '')}一覧({items.length})</h3>
           {items.length === 0 && <p style={s.emptyNote}>まだありません。上の間取り図をクリックして追加してください。</p>}
@@ -267,11 +273,11 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
                 />
               ))}
           </div>
+          <div style={s.btnRow}>
+            <button style={s.ghostBtn} onClick={() => { resetFurnitureAndZones(); setSelectedId(null); }}>初期設定(既定の家具・エリア)に戻す</button>
+          </div>
         </section>
-      </div>
-
-      <div style={s.btnRow}>
-        <button style={s.ghostBtn} onClick={() => { resetFurnitureAndZones(); setSelectedId(null); }}>初期設定(既定の家具・エリア)に戻す</button>
+        </div>
       </div>
     </div>
   );
@@ -361,17 +367,19 @@ function makeStyles(theme) {
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 12px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
-    // 他の設定画面と統一感を持たせるため、カードは3列のグリッドに並べる。
+    // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
     grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
     card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     svg: { background: svgBg, borderRadius: 10, width: '100%', height: 'auto' },
     btnRow: { display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' },
     ghostBtn: { padding: '10px 18px', fontSize: 13.5, background: 'transparent', color: theme.textMuted, border: `1px solid ${theme.borderSoft}`, borderRadius: 8, cursor: 'pointer' },
     previewWrap: { width: '100%', height: 460, background: theme.panelBgAlt, borderRadius: 10, overflow: 'hidden' },
-    listGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start', marginTop: 24 },
     emptyNote: { fontSize: 13, color: theme.textFaint, lineHeight: 1.6 },
-    rowList: { display: 'flex', flexDirection: 'column', gap: 8 },
+    // 右列(詳細設定=一覧)は項目数が増えると縦に伸びるため、左右の列(2D/3D)と
+    // 高さの釣り合いが取れるよう、上限の高さを設けてスクロールにする。
+    rowList: { display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 460, overflowY: 'auto', paddingRight: 4 },
     row: {
       display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 8,
       border: `1px solid ${theme.borderSoft}`, background: theme.panelBgAlt, cursor: 'pointer', flexWrap: 'wrap',

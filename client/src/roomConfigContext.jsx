@@ -6,6 +6,7 @@ import {
   CAMERA_YAW_DEG as DEFAULT_YAW_DEG,
   CAMERA_PITCH_DEG as DEFAULT_PITCH_DEG,
   CAMERA_FOV_DEG as DEFAULT_FOV_DEG,
+  CAMERA_RANGE_M as DEFAULT_RANGE_M,
   CAMERA_HEIGHT_M,
   DEFAULT_FURNITURE,
   DEFAULT_ZONES,
@@ -77,6 +78,7 @@ export function RoomConfigProvider({ children }) {
   const [cameraYawDeg, setCameraYawDegState] = useState(saved?.cameraYawDeg ?? DEFAULT_YAW_DEG);
   const [cameraPitchDeg, setCameraPitchDegState] = useState(saved?.cameraPitchDeg ?? DEFAULT_PITCH_DEG);
   const [cameraFovDeg, setCameraFovDegState] = useState(saved?.cameraFovDeg ?? DEFAULT_FOV_DEG);
+  const [cameraRangeM, setCameraRangeMState] = useState(saved?.cameraRangeM ?? DEFAULT_RANGE_M);
   const [cameraMode, setCameraModeState] = useState(saved?.cameraMode || 'free');
   const [furniture, setFurnitureState] = useState(
     Array.isArray(saved?.furniture) ? saved.furniture : DEFAULT_FURNITURE,
@@ -157,10 +159,10 @@ export function RoomConfigProvider({ children }) {
   // 明示的に渡さないと、無関係な項目を更新しただけでlocalStorageから消えて
   // しまう(=次回起動時に既定値へ巻き戻る)ため、必ずここを経由して保存する。
   const buildPersistPayload = useCallback((overrides) => ({
-    shape, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraMode,
+    shape, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode,
     furniture, zones, walls, doorSensors,
     ...overrides,
-  }), [shape, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraMode, furniture, zones, walls, doorSensors]);
+  }), [shape, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, furniture, zones, walls, doorSensors]);
 
   const setRoomShape = useCallback((nextShape) => {
     const nextBounds = footprintBounds(nextShape.footprint);
@@ -200,6 +202,13 @@ export function RoomConfigProvider({ children }) {
   const setCameraFov = useCallback((deg) => {
     setCameraFovDegState(deg);
     persist(buildPersistPayload({ cameraFovDeg: deg }));
+  }, [persist, buildPersistPayload]);
+
+  // 「カメラの見える範囲」(検知・表示距離)の変更。視野角(FOV)とは独立して、
+  // 間取り図・3Dプレビューの扇形をどこまで伸ばすかを調整できるようにする。
+  const setCameraRange = useCallback((m) => {
+    setCameraRangeMState(m);
+    persist(buildPersistPayload({ cameraRangeM: m }));
   }, [persist, buildPersistPayload]);
 
   const setFurnitureList = useCallback((nextFurniture) => {
@@ -340,6 +349,7 @@ export function RoomConfigProvider({ children }) {
     setCameraYawDegState(DEFAULT_YAW_DEG);
     setCameraPitchDegState(DEFAULT_PITCH_DEG);
     setCameraFovDegState(DEFAULT_FOV_DEG);
+    setCameraRangeMState(DEFAULT_RANGE_M);
     setCameraModeState('free');
     try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
   }, []);
@@ -354,6 +364,7 @@ export function RoomConfigProvider({ children }) {
     cameraYawDeg,
     cameraPitchDeg,
     cameraFovDeg,
+    cameraRangeM,
     cameraMode,
     furniture,
     zones,
@@ -368,6 +379,7 @@ export function RoomConfigProvider({ children }) {
     setCameraPlacement,
     setCameraPitch,
     setCameraFov,
+    setCameraRange,
     addFurniture,
     updateFurniture,
     removeFurniture,
@@ -394,6 +406,7 @@ export function RoomConfigProvider({ children }) {
       cameraYawDeg: DEFAULT_YAW_DEG,
       cameraPitchDeg: DEFAULT_PITCH_DEG,
       cameraFovDeg: DEFAULT_FOV_DEG,
+      cameraRangeM: DEFAULT_RANGE_M,
       cameraHeight: CAMERA_HEIGHT_M,
       furniture: DEFAULT_FURNITURE,
       zones: DEFAULT_ZONES,
@@ -401,9 +414,9 @@ export function RoomConfigProvider({ children }) {
       doorSensors: DEFAULT_DOOR_SENSORS,
     },
   }), [
-    shape, roomSize, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraMode, furniture, zones, walls, doorSensors,
+    shape, roomSize, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, furniture, zones, walls, doorSensors,
     customModelUrl, customModelName, modelLoading, modelError,
-    setRoomShape, setRoomHeight, setCameraPlacement, setCameraPitch, setCameraFov,
+    setRoomShape, setRoomHeight, setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange,
     addFurniture, updateFurniture, removeFurniture, addZone, updateZone, removeZone, resetFurnitureAndZones,
     addDoorSensor, updateDoorSensor, removeDoorSensor, resetDoorSensors,
     setWallsList, addWall, updateWall, removeWall, resetWalls,

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
+import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { CAMERA_LABEL } from '../../config';
 import { useRoomConfig } from '../../roomConfigContext';
@@ -10,28 +11,47 @@ import { useTheme } from '../../themeContext';
 // 向き・見えている範囲の目安が分かるようにするための表示用オブジェクトで、
 // 検出ロジックには影響しない。mount/yawDeg/pitchDeg/fovDegプロップが渡された
 // 場合はそちらを優先する(「カメラ位置の設定」タブ自身の保存前プレビュー用)。
-export default function CameraMount({ mount: mountProp, yawDeg: yawProp, pitchDeg: pitchProp, fovDeg: fovProp, showFov = true }) {
+export default function CameraMount({ mount: mountProp, yawDeg: yawProp, pitchDeg: pitchProp, fovDeg: fovProp, rangeM: rangeProp, showFov = true }) {
   const {
     cameraMount: ctxMount,
     cameraYawDeg: ctxYaw,
     cameraPitchDeg: ctxPitch,
     cameraFovDeg: ctxFov,
-    roomSize,
+    cameraRangeM: ctxRange,
   } = useRoomConfig();
   const { theme } = useTheme();
+  // Canvasの現在の横縦比(アスペクト比)。「カメラの視点」で実際に使っている
+  // <Canvas camera={{ fov }}>のfovはthree.jsの仕様上「垂直方向」の視野角だが、
+  // 以前はこの床面の扇形(見える範囲の目安)をfovDegの値そのまま「水平方向」の
+  // 開き角として描いていたため、Canvasが正方形でない(=横長の画面がほとんど)場合、
+  // 実際にカメラ視点で見える横方向の範囲より扇形の方が狭く描かれてしまい、
+  // 「カメラ視点と見える範囲が一致しない」という見え方の原因になっていた。
+  // ここでは垂直方向のfovDegとアスペクト比から実際の水平方向の視野角を逆算し、
+  // 扇形の開き角に使うことで、俯瞰3Dの扇形とカメラ視点の見え方を一致させる。
+  const size = useThree((state) => state.size);
+  const aspect = size.height > 0 ? size.width / size.height : 1;
 
   const mount = mountProp || ctxMount;
   const yawDeg = yawProp != null ? yawProp : ctxYaw;
   const pitchDeg = pitchProp != null ? pitchProp : ctxPitch;
   const fovDeg = fovProp != null ? fovProp : ctxFov;
+  // 「カメラの見える範囲も変更できるようにしてほしい」という要望を受け、以前は
+  // 部屋のサイズから自動計算するだけだった扇形の長さ(visualRange)を、
+  // 「カメラ位置の設定」タブで自由に調整できるcameraRangeMに置き換えた。
+  const rangeM = rangeProp != null ? rangeProp : ctxRange;
   const { x, y, z } = mount;
   const yawRad = (yawDeg * Math.PI) / 180;
   // pitchDeg: 正の値ほど下向き。Three.jsのX軸回転は正の値で上を向いてしまう
   // (右手系のため)ので、見た目が「下向き」になるよう符号を反転させている。
   const pitchRad = -(pitchDeg * Math.PI) / 180;
 
-  const visualRange = Math.min(Math.max(roomSize.width, roomSize.depth) * 0.9, 6);
-  const wedgeGeometry = useMemo(() => buildWedgeGeometry(fovDeg, visualRange), [fovDeg, visualRange]);
+  const horizontalFovDeg = useMemo(() => {
+    const verticalFovRad = (fovDeg * Math.PI) / 180;
+    const horizontalFovRad = 2 * Math.atan(Math.tan(verticalFovRad / 2) * aspect);
+    return (horizontalFovRad * 180) / Math.PI;
+  }, [fovDeg, aspect]);
+
+  const wedgeGeometry = useMemo(() => buildWedgeGeometry(horizontalFovDeg, rangeM), [horizontalFovDeg, rangeM]);
 
   return (
     <group position={[x, y, z]} rotation={[0, yawRad, 0]}>

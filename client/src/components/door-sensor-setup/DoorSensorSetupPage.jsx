@@ -119,7 +119,11 @@ export default function DoorSensorSetupPage() {
         想定ですが、この画面からもテスト用に手動で切り替えられます。
       </p>
 
+      {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
+          左列=間取り図(2D。クリック/ドラッグでの追加・移動もここで行う)、
+          中央列=3Dプレビュー、右列=一覧(各センサーの詳細設定)。 */}
       <div style={s.grid}>
+        <div style={s.col}>
         <section style={s.card}>
           <p style={s.desc}>
             {selectedId
@@ -206,7 +210,9 @@ export default function DoorSensorSetupPage() {
             </div>
           )}
         </section>
+        </div>
 
+        <div style={s.col}>
         <section style={s.card}>
           <h3 style={s.h3}>3Dプレビュー</h3>
           <p style={s.desc}>緑=閉、赤=開。配置・編集した内容は保存操作なしですぐにここと見守りダッシュボードに反映されます。</p>
@@ -214,9 +220,9 @@ export default function DoorSensorSetupPage() {
             <RoomScene viewMode="overview" people={[]} solidWalls />
           </div>
         </section>
-      </div>
+        </div>
 
-      <div style={s.listGrid}>
+        <div style={s.col}>
         <section style={s.card}>
           <h3 style={s.h3}>🚪 開閉センサー一覧({doorSensors.length})</h3>
           {doorSensors.length === 0 && <p style={s.emptyNote}>まだ開閉センサーがありません。上の間取り図をクリックして追加してください。</p>}
@@ -233,11 +239,11 @@ export default function DoorSensorSetupPage() {
               />
             ))}
           </div>
+          <div style={s.btnRow}>
+            <button style={s.ghostBtn} onClick={() => { resetDoorSensors(); setSelectedId(null); }}>初期設定(玄関・勝手口)に戻す</button>
+          </div>
         </section>
-      </div>
-
-      <div style={s.btnRow}>
-        <button style={s.ghostBtn} onClick={() => { resetDoorSensors(); setSelectedId(null); }}>初期設定(玄関・勝手口)に戻す</button>
+        </div>
       </div>
     </div>
   );
@@ -280,16 +286,17 @@ function makeStyles(theme) {
       background: theme.panelBgAlt, border: `1px solid ${theme.borderSoft}`, borderRadius: 5,
       padding: '1px 6px', fontSize: 13, color: theme.accent,
     },
+    // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
     grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
     card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     svg: { background: svgBg, borderRadius: 10, width: '100%', height: 'auto' },
     btnRow: { display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' },
     ghostBtn: { padding: '10px 18px', fontSize: 13.5, background: 'transparent', color: theme.textMuted, border: `1px solid ${theme.borderSoft}`, borderRadius: 8, cursor: 'pointer' },
     previewWrap: { width: '100%', height: 460, background: theme.panelBgAlt, borderRadius: 10, overflow: 'hidden' },
-    listGrid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start', marginTop: 24 },
     emptyNote: { fontSize: 13, color: theme.textFaint, lineHeight: 1.6 },
-    rowList: { display: 'flex', flexDirection: 'column', gap: 8 },
+    rowList: { display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 460, overflowY: 'auto', paddingRight: 4 },
     row: {
       display: 'flex', alignItems: 'center', gap: 10, padding: '9px 10px', borderRadius: 8,
       border: `1px solid ${theme.borderSoft}`, background: theme.panelBgAlt, cursor: 'pointer', flexWrap: 'wrap',
