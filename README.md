@@ -16,9 +16,9 @@ Webカメラの映像からYOLOv8を用いて人物の骨格検出を行い、3D
 
 ### パターン1: Docker Compose を使用する場合（推奨）
 ```bash
-docker-compose up -d --build
+docker compose up -d --build
 ```
-起動後、ブラウザで `http://localhost:5173` にアクセスします。
+起動後、ブラウザで `http://localhost` にアクセスします。
 
 ### パターン2: ローカルで個別に起動する場合
 
@@ -36,7 +36,7 @@ node server.js
 npm install
 npm run dev
 ```
-ブラウザで `http://localhost:5173` にアクセスします。
+ブラウザで `http://localhost` にアクセスします。
 
 ## 環境変数の設定
 `.env.example` をコピーして `.env` を作成し、必要なAWS CognitoやIoT Coreの設定を記述してください。
