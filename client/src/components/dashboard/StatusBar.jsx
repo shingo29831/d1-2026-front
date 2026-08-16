@@ -91,7 +91,7 @@ export default function StatusBar({
           onClick={() => onViewModeChange('overview')}
           style={{ ...s.toggleBtn, ...(viewMode === 'overview' ? s.toggleBtnActive : {}) }}
         >
-          俯瞰3D
+          俯瞰表示
         </button>
         <button
           onClick={() => onViewModeChange('pov')}

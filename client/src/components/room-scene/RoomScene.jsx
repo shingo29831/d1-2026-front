@@ -127,6 +127,16 @@ export default function RoomScene({
   // 見ている先(lookAt)は、カメラの向き(yaw=左右)と上下角度(pitch)から求めた
   // 方向ベクトルを、設置位置から一定距離(3m)先へ伸ばした点にしている
   // (yawDegToDirと同じsin/cosの向き定義に合わせ、pitchは正の値ほど下向き)。
+  // 【重要・不具合修正】「壁に固定」モードでは、cameraMount.x/zは壁の中心線
+  // (roomShapes.jsのnearestEdgePointが返す、壁の厚み0.08mの箱ジオメトリの
+  // まさに中心)にぴったり合わせて配置される。そのため、以前はPOVカメラの
+  // 位置をcameraMountの座標そのまま使っていたため、カメラが壁のメッシュの
+  // 内部から始まってしまい、ニアクリップ面が壁を突き抜けて、画面全体が
+  // 壁の内側に埋まったように見える(「壁にめり込んだ状態」)不具合があった。
+  // カメラが向いている方向(yaw)へわずかに(壁の厚みより少し大きい程度)
+  // 前進させた位置を実際の視点位置とすることで、壁のメッシュの外(部屋の
+  // 内側)からPOVが始まるようにしている。
+  const WALL_CLEARANCE_M = 0.18;
   const povCamera = useMemo(() => {
     const yawRad = (cameraYawDeg * Math.PI) / 180;
     const pitchRad = (cameraPitchDeg * Math.PI) / 180;
@@ -134,13 +144,19 @@ export default function RoomScene({
     const dirX = Math.sin(yawRad) * Math.cos(pitchRad);
     const dirY = -Math.sin(pitchRad);
     const dirZ = Math.cos(yawRad) * Math.cos(pitchRad);
+    // 壁は鉛直な面なので、水平方向(yawのみ)のオフセットで十分(pitchは無視)。
+    const clearX = Math.sin(yawRad) * WALL_CLEARANCE_M;
+    const clearZ = Math.cos(yawRad) * WALL_CLEARANCE_M;
+    const povX = cameraMount.x + clearX;
+    const povY = cameraMount.y;
+    const povZ = cameraMount.z + clearZ;
     return {
-      position: [cameraMount.x, cameraMount.y, cameraMount.z],
+      position: [povX, povY, povZ],
       fov: cameraFovDeg,
       lookAt: [
-        cameraMount.x + dirX * lookDist,
-        cameraMount.y + dirY * lookDist,
-        cameraMount.z + dirZ * lookDist,
+        povX + dirX * lookDist,
+        povY + dirY * lookDist,
+        povZ + dirZ * lookDist,
       ],
     };
   }, [cameraMount.x, cameraMount.y, cameraMount.z, cameraYawDeg, cameraPitchDeg, cameraFovDeg]);
@@ -183,13 +199,18 @@ export default function RoomScene({
         <PlaceholderRoom footprint={previewFootprint} height={isRoomPreview ? previewHeight : undefined} furniture={furniture} showInteriorWalls={showInteriorWalls} solidWalls={solidWalls} />
       )}
 
-      <CameraMount
-        mount={previewCameraMount}
-        yawDeg={previewCameraYawDeg}
-        pitchDeg={previewCameraPitchDeg}
-        fovDeg={previewCameraFovDeg}
-        rangeM={previewCameraRangeM}
-      />
+      {/* カメラの視点(POV)モードでは、自分自身のカメラ本体モデルが視界の
+          すぐ近くに表示され邪魔になる(不要なジオメトリがニアクリップ面付近に
+          出てしまう一因でもあった)ため、俯瞰表示のときだけ表示する。 */}
+      {viewMode !== 'pov' && (
+        <CameraMount
+          mount={previewCameraMount}
+          yawDeg={previewCameraYawDeg}
+          pitchDeg={previewCameraPitchDeg}
+          fovDeg={previewCameraFovDeg}
+          rangeM={previewCameraRangeM}
+        />
+      )}
 
       <DangerZoneMarkers peopleFloors={list.map((p) => p.floor)} zones={zones} />
       <DoorSensorMarkers doorSensors={doorSensors} />
