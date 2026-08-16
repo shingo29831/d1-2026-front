@@ -68,9 +68,6 @@ export default function IncidentHeatmap3D({ incidents }) {
     bounds.depth * 0.8 + 1.6,
   ], [bounds.width, bounds.depth, height]);
 
-  const gridSize = Math.max(bounds.width, bounds.depth) * 1.6 + 2;
-  const gridDivisions = Math.max(4, Math.round(gridSize * 2));
-
   return (
     // Canvas(WebGL)内で何らかの例外が起きても画面全体が真っ白にならないよう、
     // この3D表示部分だけを局所的に受け止めるエラー境界で包む。
@@ -99,7 +96,7 @@ export default function IncidentHeatmap3D({ incidents }) {
           <HeatCell key={i} cell={c} />
         ))}
 
-        <gridHelper args={[gridSize, gridDivisions, theme.sceneGrid1, theme.sceneGrid2]} position={[0, 0.001, 0]} />
+        {/* 「3D表示の下のあみあみ(網目)を消してほしい」という要望を受けてgridHelperを削除。 */}
         <OrbitControls enableDamping dampingFactor={0.1} minDistance={0.8} maxDistance={24} />
       </Canvas>
     </Canvas3DErrorBoundary>

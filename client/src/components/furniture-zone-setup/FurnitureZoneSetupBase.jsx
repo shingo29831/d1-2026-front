@@ -2,7 +2,8 @@ import React, { useMemo, useRef, useState } from 'react';
 import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
-import { footprintBounds } from '../../roomShapes';
+import { footprintBounds, footprintEdges } from '../../roomShapes';
+import { isPositionBlocked } from '../../roomCollision';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -11,6 +12,17 @@ const DRAG_THRESHOLD_PX = 3; // これ以上動いたら「クリック」では
 
 function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
+}
+
+// 家具を、壁・他の家具と重ならない位置にだけ置けるようにする際の「半径」。
+// 家具は矩形だが、既存のisPositionBlocked()は点+半径での判定のため、家具自身の
+// 矩形を包む円(中心から角までの距離)を半径として使う、やや安全側の近似判定にしている
+// (回転によっては実際より少し手前で止まることがあるが、壁・他の家具にめり込む
+// ことは確実に防げる)。
+function furnitureRadius(item) {
+  const halfW = (item?.width || 0.6) / 2;
+  const halfD = (item?.depth || 0.5) / 2;
+  return Math.hypot(halfW, halfD);
 }
 
 // 「家具の設定」「エリアの設定」の共通実装。
@@ -22,7 +34,7 @@ function clamp(v, lo, hi) {
 // (クリック・ドラッグ不可)にする。
 export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
   const {
-    footprint, furniture, zones,
+    footprint, furniture, zones, walls, roomShapeType,
     addFurniture, updateFurniture, removeFurniture,
     addZone, updateZone, removeZone,
     resetFurnitureAndZones,
@@ -38,6 +50,35 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
   const [dragPos, setDragPos] = useState(null); // { id, x, z } | null (ドラッグ中のプレビュー位置)
 
   const bounds = useMemo(() => footprintBounds(footprint), [footprint]);
+
+  // 「設定した家具や壁をすり抜けないようにしてほしい」という要望への対応。
+  // 【重要・不具合修正】以前は間取り図上で家具をドラッグ/クリック配置するとき、
+  // 部屋の外形の単純なバウンディングボックス(bounds.minX〜maxXなど)にしか
+  // クランプしておらず、壁(外壁・間仕切り壁)や他の家具を無視してすり抜けて
+  // 配置できてしまっていた(見守りダッシュボード側のダミー人物移動には既に
+  // 同様の衝突判定があったが、この家具配置UI側には無かった)。
+  // 家具(kind==='furniture')のときだけ、壁・他の家具との重なりを判定する
+  // (エリアは物理的な物体ではなく「場所」を示すものなので、家具や壁の上に
+  // 設定できて問題ない。従来通りバウンディングボックスのクランプのみ)。
+  const exteriorWalls = useMemo(
+    () => footprintEdges(footprint).map(([a, b]) => ({ x1: a.x, z1: a.z, x2: b.x, z2: b.z })),
+    [footprint]
+  );
+  const collisionWalls = useMemo(
+    () => (roomShapeType === 'custom' ? [...exteriorWalls, ...(Array.isArray(walls) ? walls : [])] : exteriorWalls),
+    [exteriorWalls, walls, roomShapeType]
+  );
+  // 指定の位置(x,z)に、家具itemを置いたら壁または他の家具(自分自身は除く)に
+  // 重なってしまうかどうかを判定する。家具の設定ページ以外(kind!=='furniture')では
+  // 常にfalse(判定しない=従来通り自由に配置できる)。
+  const isFurnitureBlocked = (x, z, item, excludeId) => {
+    if (kind !== 'furniture') return false;
+    const otherFurniture = furniture.filter((f) => f.id !== excludeId);
+    return isPositionBlocked(
+      { x, z },
+      { walls: collisionWalls, furniture: otherFurniture, includeWalls: true, personRadius: furnitureRadius(item) }
+    );
+  };
   const scale = useMemo(() => {
     const spanX = bounds.width + 1.2;
     const spanZ = bounds.depth + 1.2;
@@ -73,10 +114,17 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
     const { x: cx, z: cz } = eventToRoom(e);
 
     if (selectedId) {
+      // 選択中の家具をクリックした位置へ移動。壁・他の家具と重なる位置には
+      // 移動しない(クリックしても何も起きない=元の位置のまま)。
+      const selectedItem = items.find((it) => it.id === selectedId);
+      if (isFurnitureBlocked(cx, cz, selectedItem, selectedId)) return;
       updateItem(selectedId, { x: cx, z: cz });
       return;
     }
 
+    // 新規追加(家具は既定サイズの0.6×0.5で判定する)。壁・他の家具と重なる
+    // 位置には追加しない。
+    if (isFurnitureBlocked(cx, cz, {}, null)) return;
     const id = addItem(cx, cz);
     setSelectedId(id);
   };
@@ -99,6 +147,10 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
     if (!drag.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD_PX) return;
     drag.moved = true;
     const { x, z } = eventToRoom(e);
+    // 壁・他の家具と重なる位置へはドラッグのプレビューも進めない(直前の有効な
+    // 位置のまま止まって見える=壁や家具の手前で引っかかるような操作感になる)。
+    const item = items.find((it) => it.id === id);
+    if (isFurnitureBlocked(x, z, item, id)) return;
     setDragPos({ id, x, z });
   };
 
@@ -107,7 +159,12 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
     if (!drag || drag.id !== id) return;
     if (drag.moved) {
       const { x, z } = eventToRoom(e);
-      updateItem(id, { x, z });
+      const item = items.find((it) => it.id === id);
+      // 壁・他の家具と重ならない位置のときだけ実際の位置を確定する
+      // (重なる位置の場合は何もせず、ドラッグ開始前の位置に戻る)。
+      if (!isFurnitureBlocked(x, z, item, id)) {
+        updateItem(id, { x, z });
+      }
     } else {
       selectItem(id);
     }

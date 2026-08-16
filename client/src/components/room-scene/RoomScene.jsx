@@ -132,10 +132,12 @@ export default function RoomScene({
   // まさに中心)にぴったり合わせて配置される。そのため、以前はPOVカメラの
   // 位置をcameraMountの座標そのまま使っていたため、カメラが壁のメッシュの
   // 内部から始まってしまい、ニアクリップ面が壁を突き抜けて、画面全体が
-  // 壁の内側に埋まったように見える(「壁にめり込んだ状態」)不具合があった。
-  // カメラが向いている方向(yaw)へわずかに(壁の厚みより少し大きい程度)
-  // 前進させた位置を実際の視点位置とすることで、壁のメッシュの外(部屋の
-  // 内側)からPOVが始まるようにしている。
+  // 壁の内側に埋まったように見える(手前の壁が画面いっぱいに歪んで見える)
+  // 不具合があった。カメラが向いている方向(yaw)へわずかに(壁の厚みより
+  // 十分外側に出る距離)前進させた位置を実際の視点位置とすることで、壁の
+  // メッシュの外(部屋の内側)からPOVが始まるようにしている。
+  // 「自由配置」モードなど壁際でない場合でも、この程度のオフセットは
+  // 見た目にほとんど影響しない。
   const WALL_CLEARANCE_M = 0.18;
   const povCamera = useMemo(() => {
     const yawRad = (cameraYawDeg * Math.PI) / 180;
@@ -144,7 +146,8 @@ export default function RoomScene({
     const dirX = Math.sin(yawRad) * Math.cos(pitchRad);
     const dirY = -Math.sin(pitchRad);
     const dirZ = Math.cos(yawRad) * Math.cos(pitchRad);
-    // 壁は鉛直な面なので、水平方向(yawのみ)のオフセットで十分(pitchは無視)。
+    // 前進オフセットは上下角度(pitch)の影響を受けない水平方向(yaw)成分のみ
+    // で計算する(壁は垂直面のため、壁から離れる方向は常に水平でよい)。
     const clearX = Math.sin(yawRad) * WALL_CLEARANCE_M;
     const clearZ = Math.cos(yawRad) * WALL_CLEARANCE_M;
     const povX = cameraMount.x + clearX;
@@ -160,12 +163,6 @@ export default function RoomScene({
       ],
     };
   }, [cameraMount.x, cameraMount.y, cameraMount.z, cameraYawDeg, cameraPitchDeg, cameraFovDeg]);
-
-  // 床のグリッドは部屋のサイズに合わせて表示する(常に固定サイズの巨大なグリッドを
-  // 敷いていると、小さい部屋では間延びして見え、俯瞰視点によっては壁の外側が
-  // 急に真っ暗な靄のように見えてしまっていたため、部屋の大きさに応じたサイズにする)
-  const gridSize = Math.max(bounds.width, bounds.depth) * 1.6 + 2;
-  const gridDivisions = Math.max(4, Math.round(gridSize * 2));
 
   return (
     // Canvas(WebGL)内で何らかの例外が起きても画面全体が真っ白にならないよう、
@@ -199,9 +196,10 @@ export default function RoomScene({
         <PlaceholderRoom footprint={previewFootprint} height={isRoomPreview ? previewHeight : undefined} furniture={furniture} showInteriorWalls={showInteriorWalls} solidWalls={solidWalls} />
       )}
 
-      {/* カメラの視点(POV)モードでは、自分自身のカメラ本体モデルが視界の
-          すぐ近くに表示され邪魔になる(不要なジオメトリがニアクリップ面付近に
-          出てしまう一因でもあった)ため、自由視点のときだけ表示する。 */}
+      {/* 「カメラの視点」表示中は、見ている本人の視点のすぐそば(あるいは
+          視界の中)にカメラ自身の筐体・レンズ・視野角の扇形を表示しても
+          意味がなく、むしろ視界の邪魔になるだけなので非表示にする
+          (自由視点や各設定タブのプレビューでは従来通り表示する)。 */}
       {viewMode !== 'pov' && (
         <CameraMount
           mount={previewCameraMount}
@@ -235,7 +233,10 @@ export default function RoomScene({
         <HeatmapOverlay3D incidents={heatmapIncidents} footprint={footprint} />
       )}
 
-      <gridHelper args={[gridSize, gridDivisions, theme.sceneGrid1, theme.sceneGrid2]} position={[0, 0.001, 0]} />
+      {/* 【不具合修正】以前は床にgridHelper(方眼状の網目模様)を重ねて表示していたが、
+          「3D表示の下のあみあみ(網目)を消してほしい」という要望を受けて削除した。
+          床のサイズ感は床面(PlaceholderRoom.jsxのmeshStandardMaterial)自体の
+          陰影・部屋の外形線だけで十分伝わるため、削除しても部屋の見え方に支障はない。 */}
 
       <CameraRig viewMode={viewMode} overviewCamera={overviewCamera} povCamera={povCamera} />
     </Canvas>
