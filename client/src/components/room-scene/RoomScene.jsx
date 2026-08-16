@@ -9,6 +9,7 @@ import DangerZoneMarkers from './DangerZoneMarkers';
 import DoorSensorMarkers from './DoorSensorMarkers';
 import CameraMount from './CameraMount';
 import HeatmapOverlay3D from './HeatmapOverlay3D';
+import HeatmapHotspots from './HeatmapHotspots';
 import Canvas3DErrorBoundary from './Canvas3DErrorBoundary';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
@@ -231,6 +232,15 @@ export default function RoomScene({
           ときだけ表示する(showHeatmap)。 */}
       {showHeatmap && (
         <HeatmapOverlay3D incidents={heatmapIncidents} footprint={footprint} />
+      )}
+
+      {/* 「ヒートマップボタンを押したらそこから吹き出しが出て、危険行為が多い
+          場所で何が起きたか＋直近3件を見られるようにしてほしい」という要望を
+          受けて追加。上のHeatmapOverlay3D(色の濃淡)とは別に、実際の履歴を
+          クリック可能な件数バッジとして重ね、押すとカテゴリ内訳+直近3件の
+          吹き出しを開く。表示条件はHeatmapOverlay3Dと同じ(showHeatmap)。 */}
+      {showHeatmap && (
+        <HeatmapHotspots incidents={heatmapIncidents} />
       )}
 
       {/* 【不具合修正】以前は床にgridHelper(方眼状の網目模様)を重ねて表示していたが、
