@@ -223,7 +223,7 @@ export default function CameraSetupPage() {
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
           左列=間取り図(2D。カメラのドラッグ移動もここで行う)、中央列=3Dプレビュー
-          (俯瞰表示/カメラの視点)、右列=設置方法・高さ/向き/上下角度/視野角などの
+          (自由視点/カメラの視点)、右列=設置方法・高さ/向き/上下角度/視野角などの
           詳細設定。 */}
       <div style={s.grid}>
         <div style={s.col}>
@@ -286,7 +286,7 @@ export default function CameraSetupPage() {
                   onClick={() => setPreviewMode('overview')}
                   style={{ ...s.toggleBtn, ...(previewMode === 'overview' ? s.toggleBtnActive : {}) }}
                 >
-                  俯瞰表示
+                  自由視点
                 </button>
                 <button
                   onClick={() => setPreviewMode('pov')}

@@ -201,7 +201,7 @@ export default function RoomScene({
 
       {/* カメラの視点(POV)モードでは、自分自身のカメラ本体モデルが視界の
           すぐ近くに表示され邪魔になる(不要なジオメトリがニアクリップ面付近に
-          出てしまう一因でもあった)ため、俯瞰表示のときだけ表示する。 */}
+          出てしまう一因でもあった)ため、自由視点のときだけ表示する。 */}
       {viewMode !== 'pov' && (
         <CameraMount
           mount={previewCameraMount}

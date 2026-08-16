@@ -91,7 +91,7 @@ export default function StatusBar({
           onClick={() => onViewModeChange('overview')}
           style={{ ...s.toggleBtn, ...(viewMode === 'overview' ? s.toggleBtnActive : {}) }}
         >
-          俯瞰表示
+          自由視点
         </button>
         <button
           onClick={() => onViewModeChange('pov')}
@@ -108,7 +108,7 @@ export default function StatusBar({
           style={{ ...s.toggleBtn, ...(heatmapOn ? s.toggleBtnActive : {}) }}
           title="危険行為の履歴をもとにした発生密度ヒートマップを、部屋の床に重ねて表示します"
         >
-          🔥 ヒートマップ
+          ヒートマップ
         </button>
       </div>
     </div>

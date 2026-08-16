@@ -4,9 +4,9 @@ import NotificationPanel from './NotificationPanel';
 import KeyLegendOverlay from './KeyLegendOverlay';
 import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
-import { footprintBounds, footprintCenter } from '../../roomShapes';
+import { footprintBounds, footprintCenter, footprintEdges } from '../../roomShapes';
 import { isInsideZone } from '../../poseGeometry';
-import { isPositionBlocked } from '../../roomCollision';
+import { isPositionBlocked, resolveSafePosition } from '../../roomCollision';
 import { THRESHOLDS } from '../../config';
 import { useTheme } from '../../themeContext';
 import { getIncidentsSortedDesc } from '../../incidentHistory';
@@ -114,6 +114,25 @@ export default function MonitoringDashboard({
   const [selectedDummyId, setSelectedDummyId] = useState(null);
   const bounds = useMemo(() => footprintBounds(footprint), [footprint]);
 
+  // 「家具や壁にめり込ませないようにしてほしい」という要望への対応。
+  // 【重要・不具合修正】以前は外壁(部屋の外形そのもの)が衝突判定の対象に
+  // 含まれておらず、部屋の外形からの単純なクランプ(bounds.minX+0.15 など)
+  // だけに頼っていたため、L字型など長方形以外の部屋では外壁の外側(部屋の
+  // 形の外)にはみ出せてしまったり、外壁の余白がPERSON_RADIUS_M分の必要な
+  // 厚みより狭く、壁にわずかにめり込んで見えることがあった。ここで部屋の
+  // 外形(footprint)の各辺を壁として明示的に衝突判定に含めるようにする
+  // (PlaceholderRoom.jsxが実際に描画する外壁の位置と完全に一致させるため、
+  // 同じfootprintEdges()を使う)。室内の間仕切り壁(walls)は、それが実際に
+  // 表示されるとき(roomShapeType==='custom')だけ追加で含める。
+  const exteriorWalls = useMemo(
+    () => footprintEdges(footprint).map(([a, b]) => ({ x1: a.x, z1: a.z, x2: b.x, z2: b.z })),
+    [footprint]
+  );
+  const collisionWalls = useMemo(
+    () => (roomShapeType === 'custom' ? [...exteriorWalls, ...(Array.isArray(walls) ? walls : [])] : exteriorWalls),
+    [exteriorWalls, walls, roomShapeType]
+  );
+
   // 直近で押された数字キー(1〜9)。KeyLegendOverlay側で該当行を一瞬だけ
   // ハイライトする「押した瞬間のフィードバック」用。flashTimerRefで前回分の
   // setTimeoutを覚えておき、連打された場合は毎回タイマーを張り直す。
@@ -134,9 +153,12 @@ export default function MonitoringDashboard({
     const offset = ((dummies.length % 5) - 2) * 0.4;
     const x = clamp(center.x + offset, bounds.minX + 0.2, bounds.maxX - 0.2);
     const z = clamp(center.z, bounds.minZ + 0.2, bounds.maxZ - 0.2);
-    setDummies((prev) => [...prev, { id, x, z }]);
+    // 部屋の中心付近にちょうど家具が置かれている場合に備え、置いた瞬間から
+    // 家具・壁にめり込んで見えないよう、必要なら安全な位置へ少しだけ押し出す。
+    const safe = resolveSafePosition({ x, z }, { walls: collisionWalls, furniture });
+    setDummies((prev) => [...prev, { id, x: safe.x, z: safe.z }]);
     setSelectedDummyId(id);
-  }, [dummies.length, footprint, bounds]);
+  }, [dummies.length, footprint, bounds, collisionWalls, furniture]);
 
   // ダミーごとに「現在どのエリアの中にいるか」を覚えておくための参照
   // (実検出のuseMonitoringAlerts.js内のactiveZonesと同じ「入った瞬間だけ通知する」
@@ -201,11 +223,11 @@ export default function MonitoringDashboard({
           if (e.key === 'ArrowLeft') x -= DUMMY_STEP_M;
           if (e.key === 'ArrowRight') x += DUMMY_STEP_M;
           const next = { x: clamp(x, bounds.minX + 0.15, bounds.maxX - 0.15), z: clamp(z, bounds.minZ + 0.15, bounds.maxZ - 0.15) };
-          // 家具や壁と重なる移動先には進めないようにする(以前はfootprintの範囲内
-          // であれば家具・壁を無視してすり抜けて移動できてしまっていた)。
-          // 間仕切り壁は「部屋の設定」で既定の間取り(自由な多角形)を使っている
-          // ときだけ判定に含める(PlaceholderRoom.jsxの表示条件と合わせている)。
-          if (isPositionBlocked(next, { walls, furniture, includeWalls: roomShapeType === 'custom' })) {
+          // 家具や壁(外壁・間仕切り壁の両方)と重なる移動先には進めないようにする
+          // (以前は外壁が判定に含まれておらず、footprintの範囲内であれば家具・壁を
+          // 無視してすり抜けて移動できてしまっていた)。collisionWallsには常に外壁を、
+          // 間仕切り壁は実際に表示されているとき(roomShapeType==='custom')だけ含めている。
+          if (isPositionBlocked(next, { walls: collisionWalls, furniture, includeWalls: true })) {
             return d;
           }
           return { ...d, ...next };
@@ -247,15 +269,21 @@ export default function MonitoringDashboard({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedDummyId, bounds, zones, pushNotification, flashDummyKey]);
+    // 【修正】以前はwalls/furniture/collisionWallsが依存配列に無く、それらの値が
+    // 変わってもこのuseEffect内のクロージャが古い値を参照し続けてしまっていた
+    // (「部屋の設定」「家具・エリアの設定」タブで変更した直後は反映されないバグ)。
+  }, [selectedDummyId, bounds, zones, pushNotification, flashDummyKey, collisionWalls, furniture]);
 
   // 見守りシーンに表示する人物一覧(検出された全員分)。主対象(先頭の1人)には
   // 通知と連動した色を、それ以外には控えめな標準色を割り当てる。
+  // 【重要】実際のYOLO検出座標(p.floor)そのものは書き換えず、resolveSafePosition()で
+  // 「表示位置だけ」を家具・壁にめり込まないよう僅かに押し出す(危険エリア判定などは
+  // 元の座標(primaryPerson/useMonitoringAlerts側)のまま使われるため、判定結果には影響しない)。
   const people = isLost
     ? []
     : allPersons.map((p, idx) => ({
         id: idx,
-        floor: p.floor,
+        floor: resolveSafePosition(p.floor, { walls: collisionWalls, furniture }),
         fallen: p.aspectRatio < THRESHOLDS.FALL_ASPECT_RATIO,
         colorState: idx === 0 ? colorState : 'normal',
       }));

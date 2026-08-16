@@ -94,7 +94,17 @@ function imageToFloor(imgX, imgY, roomConfig) {
 
   const yawRad = (yawDeg * Math.PI) / 180;
   const forward = { x: Math.sin(yawRad), z: Math.cos(yawRad) };
-  const right = { x: Math.cos(yawRad), z: -Math.sin(yawRad) };
+  // 【重要・不具合修正】以前はright = {x:cos(yaw), z:-sin(yaw)}(=forwardを
+  // 90°回転させただけ)を使っていたが、これは実は「カメラの左」方向であり、
+  // 3D表示(RoomScene.jsxのPOVカメラや、CameraMountの視野角の扇形など)が実際に
+  // 使っているThree.jsのカメラ座標系上の「右」(forward方向を向いたときの
+  // ローカル+X軸 = cross(forward, up))とは符号が逆だった。そのため、実際に
+  // カメラから見て右側(カメラ画像でも右側=imgXが大きい側)に人が動くと、
+  // 見守りモニターの3D表示では逆にカメラの左側に人が動いて見えてしまう
+  // (左右が反転して見える)不具合があった。cross(forward, up)と一致する
+  // 符号(-cos(yaw), sin(yaw))に修正し、カメラ画像の左右と3D表示上の
+  // 「カメラから見た左右」が一致するようにする。
+  const right = { x: -Math.cos(yawRad), z: Math.sin(yawRad) };
 
   // 部屋の footprint をカメラの前方/右方向に投影し、カメラから見た奥行き・左右の
   // 広がりを求める(長方形以外の形やカメラの自由配置でも破綻しないようにするため)。
