@@ -6,6 +6,7 @@ import {
   CAMERA_PITCH_DEG as DEFAULT_PITCH_DEG,
   CAMERA_FOV_DEG as DEFAULT_FOV_DEG,
 } from './config';
+import { footprintBounds } from './roomShapes';
 
 // ===================================================================
 // YOLOv8-Poseの2Dキーポイント(画像座標: 640x480, カメラ映像基準)から、
@@ -115,7 +116,11 @@ export function imageToFloor(imgX, imgY, roomConfig) {
   // 画像は左上が原点・下方向が+Yのため、ndcYは向きを反転させて
   // 「画像の上側=+1、下側=-1」になるようにしている(カメラのローカル空間の
   // 上方向=+Yに合わせるため)。
-  const ndcX = (imgX / IMG_W) * 2 - 1;
+  // 【不具合修正】実機で動作確認したところ、前後(奥行き)の表示は正しいが、
+  // 左右が反転して表示されるとの報告があった。前後(pitch/ndcY側)は問題ない
+  // ことから、原因は画像の左右(ndcX)の向きにあると判断し、ndcXの符号を
+  // 反転させた(画像の右側=ndcX+1ではなく、画像の右側=ndcX-1になるようにする)。
+  const ndcX = 1 - (imgX / IMG_W) * 2;
   const ndcY = 1 - (imgY / IMG_H) * 2;
 
   const aspect = IMG_W / IMG_H;
@@ -151,24 +156,51 @@ export function imageToFloor(imgX, imgY, roomConfig) {
   // 3. 画像上のピクセル位置(NDC)に応じて、上記の基底ベクトルを合成し、
   // カメラからそのピクセルの方向へ伸びる実際のレイ(方向ベクトル)を求める
   // (前方distanceを1とした仮想フィルム面上の点への方向)。
-  const dir = {
+  const rawDir = {
     x: forward.x + right.x * ndcX * aspect * tanFov + up.x * ndcY * tanFov,
     y: forward.y + right.y * ndcX * aspect * tanFov + up.y * ndcY * tanFov,
     z: forward.z + right.z * ndcX * aspect * tanFov + up.z * ndcY * tanFov,
   };
+  // 【重要】rawDirは長さ1のベクトルではない(画像の端に近いピクセルほど、
+  // 仮想フィルム面までの距離が長くなる分だけ長さも伸びる)。そのまま
+  // 「t = -cameraMount.y / rawDir.y」で交差点を求めることはできる(tは
+  // 「rawDirの何倍進んだか」を表すスカラーとして機能する)ものの、下記の
+  // 投影距離クランプ処理は「実際のメートル単位の距離」を扱いたいため、
+  // ここで正規化(長さ1のベクトルに)しておく。正規化後は t がそのまま
+  // カメラからの実距離(メートル)になる。
+  const dirLen = Math.hypot(rawDir.x, rawDir.y, rawDir.z) || 1;
+  const dir = { x: rawDir.x / dirLen, y: rawDir.y / dirLen, z: rawDir.z / dirLen };
 
   // 4. レイと床面（Y=0）の交差判定
-  // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(t)で床に到達するか計算
-  if (dir.y >= 0) {
-    // レイが水平または上を向いている（床と交差しない＝空や遠くの壁を見ている）場合
-    // 計算不能なため、カメラの正面遠方（仮に10m先）の座標を返す
+  // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(t、メートル)で
+  // 床に到達するか計算する。
+  //
+  // 【不具合修正】「カメラから離れた人物の表示が不安定・不正確になる」という
+  // 報告を受けて修正。レイが水平に近づく(dir.yが0に近づく)ほど、
+  // t = -cameraMount.y / dir.y は際限なく大きくなる。人物が遠くにいるほど
+  // 画像上では小さく写り、YOLOの検出キーポイントがわずかにブレやすくなる
+  // (=dir.yがわずかにブレやすくなる)ため、この「dir.yがほぼ0のときの
+  // 割り算の急激な増幅」と組み合わさることで、遠くの人物ほどフロア座標が
+  // 実際の部屋を大きく超えて飛んだり、フレームごとに大きく揺れ動いたりする
+  // 不具合になっていた。実際の部屋の広さを大きく超える投影距離は現実的に
+  // あり得ないため、部屋の対角線の長さ(footprintBounds)をもとに、投影距離の
+  // 上限(部屋を一回り超える程度の余裕を持たせた距離)を設け、極端に水平に
+  // 近いレイでもこの上限を超えないようクランプする。
+  const footprint = roomConfig?.footprint || DEFAULT_FOOTPRINT;
+  const roomBounds = footprintBounds(footprint);
+  const roomDiagonalM = Math.hypot(roomBounds.width, roomBounds.depth);
+  const MAX_RAY_DISTANCE_M = Math.max(roomDiagonalM * 1.5, 5);
+
+  if (dir.y >= -1e-4) {
+    // レイがほぼ水平または上を向いている（床とほぼ交差しない＝空や遠くの壁を
+    // 見ている）場合は、割り算が発散するため、上限距離の位置を返す。
     return {
-      x: cameraMount.x + dir.x * 10,
-      z: cameraMount.z + dir.z * 10,
+      x: cameraMount.x + dir.x * MAX_RAY_DISTANCE_M,
+      z: cameraMount.z + dir.z * MAX_RAY_DISTANCE_M,
     };
   }
 
-  const t = -cameraMount.y / dir.y;
+  const t = Math.min(-cameraMount.y / dir.y, MAX_RAY_DISTANCE_M);
 
   // 交差点（床の上の座標）
   return {
