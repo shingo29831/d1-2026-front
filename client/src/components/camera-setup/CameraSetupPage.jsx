@@ -9,6 +9,9 @@ const SVG_H = 420;
 const PAD = 36;
 const HEIGHT_LIMITS = { min: 0.5, max: 2.6, step: 0.1 };
 const FOV_LIMITS = { min: 30, max: 120, step: 1 };
+// カメラの見える範囲(検知・表示距離)。あまり短いと部屋の中央にすら届かず、
+// 長すぎても間取り図からはみ出すだけになるため、この範囲に制限している。
+const RANGE_LIMITS = { min: 1, max: 10, step: 0.5 };
 // 上下の角度(pitch)。0=水平、正の値ほど下向き、負の値は上向き。
 // 真下や真上まで振り切れる機種は稀なので±75°程度に制限している。
 const PITCH_LIMITS = { min: -75, max: 75, step: 1 };
@@ -28,11 +31,14 @@ function clamp(v, lo, hi) {
 // 「壁に固定」モードでは間取り図の中をクリックすると、一番近い壁にカメラが
 // 自動的に吸着配置される(実機は壁掛けカメラのため)。「自由配置」モードでは
 // 部屋の中の好きな位置に置き、向き(角度)を自由に設定できる。
-// 視野角(FOV)はスライダーで調整でき、間取り図・3Dプレビューの両方に反映される。
+// 視野角(FOV)・見える範囲(距離)はどちらもスライダーで調整でき、間取り図・
+// 3Dプレビューの両方に反映される。以前は見える範囲を部屋のサイズから自動計算する
+// だけだったが、「カメラの見える範囲も変更できるようにしてほしい」という要望を
+// 受けてcameraRangeM(roomConfigContext.jsx)として独立に調整できるようにした。
 export default function CameraSetupPage() {
   const {
-    footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraMode, zones,
-    setCameraPlacement, setCameraPitch, setCameraFov, defaults,
+    footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, zones,
+    setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange, defaults,
   } = useRoomConfig();
   const { theme } = useTheme();
 
@@ -40,6 +46,7 @@ export default function CameraSetupPage() {
   const [draftYaw, setDraftYaw] = useState(cameraYawDeg);
   const [draftPitch, setDraftPitch] = useState(cameraPitchDeg);
   const [draftFov, setDraftFov] = useState(cameraFovDeg);
+  const [draftRange, setDraftRange] = useState(cameraRangeM);
   const [draftMode, setDraftMode] = useState(cameraMode || 'wall');
   const [saved, setSaved] = useState(false);
   const [previewMode, setPreviewMode] = useState('overview');
@@ -156,10 +163,19 @@ export default function CameraSetupPage() {
     setDraftFov(Number(value));
   };
 
+  // 「カメラの見える範囲も変更できるようにしてほしい」という要望への対応。
+  // 以前は部屋のサイズから自動計算した固定の距離(visRange)だったが、
+  // ユーザーがスライダーで自由に調整できるようにした。
+  const handleRangeChange = (value) => {
+    setSaved(false);
+    setDraftRange(Number(value));
+  };
+
   const handleSave = () => {
     setCameraPlacement(draftMount, draftYaw, draftMode);
     setCameraPitch(draftPitch);
     setCameraFov(draftFov);
+    setCameraRange(draftRange);
     setSaved(true);
   };
 
@@ -168,16 +184,18 @@ export default function CameraSetupPage() {
     setDraftYaw(defaults.cameraYawDeg);
     setDraftPitch(defaults.cameraPitchDeg);
     setDraftFov(defaults.cameraFovDeg);
+    setDraftRange(defaults.cameraRangeM);
     setDraftMode('wall');
     setCameraPlacement(defaults.cameraMount, defaults.cameraYawDeg, 'wall');
     setCameraPitch(defaults.cameraPitchDeg);
     setCameraFov(defaults.cameraFovDeg);
+    setCameraRange(defaults.cameraRangeM);
     setSaved(false);
   };
 
   const markerPos = roomToSvg(draftMount.x, draftMount.z);
   const dir = yawDegToDir(draftYaw);
-  const visRange = Math.max(bounds.width, bounds.depth) * 0.4 + 0.6;
+  const visRange = draftRange;
   const yawRad = (draftYaw * Math.PI) / 180;
   const halfFovRad = (draftFov * Math.PI) / 360;
   const wedgeSegments = 12;
@@ -199,143 +217,166 @@ export default function CameraSetupPage() {
       <p style={s.lead}>
         見守りカメラを実際にどこへ設置するか決めるページです。「壁に固定」では間取り図内をクリックすると
         一番近い壁にカメラが自動的に吸着して配置されます(実機は壁掛けカメラのため)。「自由配置」では
-        部屋の中の好きな位置にカメラを置き、向き(角度)を自由に回転させられます。視野角(FOV)は
-        水色の扇形で表示されます。
+        部屋の中の好きな位置にカメラを置き、向き(角度)を自由に回転させられます。視野角(FOV)と
+        見える範囲(距離)は水色の扇形で表示され、どちらもスライダーで調整できます。
       </p>
 
+      {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
+          左列=間取り図(2D。カメラのドラッグ移動もここで行う)、中央列=3Dプレビュー
+          (自由視点/カメラの視点)、右列=設置方法・高さ/向き/上下角度/視野角などの
+          詳細設定。 */}
       <div style={s.grid}>
-        <section style={s.card}>
-          <h3 style={s.h3}>設置方法</h3>
-          <div style={s.shapeTabs}>
-            <button onClick={() => handleModeChange('wall')} style={{ ...s.shapeTab, ...(draftMode === 'wall' ? s.shapeTabActive : {}) }}>壁に固定</button>
-            <button onClick={() => handleModeChange('free')} style={{ ...s.shapeTab, ...(draftMode === 'free' ? s.shapeTabActive : {}) }}>自由配置</button>
-          </div>
+        <div style={s.col}>
+          <section style={s.card}>
+            <h3 style={s.h3}>間取り図(真上から見た図)</h3>
+            <p style={s.desc}>部屋の中をクリック/タップしてカメラの位置を選んでください。水色の扇形が視野角(FOV)の目安です。</p>
 
-          <h3 style={s.h3}>間取り図(真上から見た図)</h3>
-          <p style={s.desc}>部屋の中をクリック/タップしてカメラの位置を選んでください。水色の扇形が視野角(FOV)の目安です。</p>
+            <svg ref={svgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={s.svg} onClick={handleClick}>
+              <rect x={0} y={0} width={SVG_W} height={SVG_H} fill={s.svgBg} />
+              <polygon points={polygonPoints} fill={theme.mode === 'dark' ? '#161c28' : '#ffffff'} stroke={theme.borderSoft} strokeWidth={2} />
 
-          <svg ref={svgRef} width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={s.svg} onClick={handleClick}>
-            <rect x={0} y={0} width={SVG_W} height={SVG_H} fill={s.svgBg} />
-            <polygon points={polygonPoints} fill={theme.mode === 'dark' ? '#161c28' : '#ffffff'} stroke={theme.borderSoft} strokeWidth={2} />
+              {(Array.isArray(zones) ? zones : []).map((zone) => {
+                const tl = roomToSvg(zone.x - zone.width / 2, zone.z - zone.depth / 2);
+                const br = roomToSvg(zone.x + zone.width / 2, zone.z + zone.depth / 2);
+                return (
+                  <rect
+                    key={zone.id}
+                    x={tl.sx} y={tl.sy} width={br.sx - tl.sx} height={br.sy - tl.sy}
+                    fill={zone.type === 'danger' ? 'rgba(244,63,94,0.25)' : 'rgba(245,158,11,0.22)'}
+                    stroke={zone.type === 'danger' ? '#f43f5e' : '#f59e0b'}
+                    strokeWidth={1}
+                  />
+                );
+              })}
 
-            {(Array.isArray(zones) ? zones : []).map((zone) => {
-              const tl = roomToSvg(zone.x - zone.width / 2, zone.z - zone.depth / 2);
-              const br = roomToSvg(zone.x + zone.width / 2, zone.z + zone.depth / 2);
-              return (
-                <rect
-                  key={zone.id}
-                  x={tl.sx} y={tl.sy} width={br.sx - tl.sx} height={br.sy - tl.sy}
-                  fill={zone.type === 'danger' ? 'rgba(244,63,94,0.25)' : 'rgba(245,158,11,0.22)'}
-                  stroke={zone.type === 'danger' ? '#f43f5e' : '#f59e0b'}
-                  strokeWidth={1}
-                />
-              );
-            })}
+              {/* 視野角(FOV)の扇形 */}
+              <polygon points={wedgePathStr} fill={theme.accent} opacity={0.18} />
 
-            {/* 視野角(FOV)の扇形 */}
-            <polygon points={wedgePathStr} fill={theme.accent} opacity={0.18} />
+              {/* 向き(矢印) */}
+              <line x1={markerPos.sx} y1={markerPos.sy} x2={arrowEnd.sx} y2={arrowEnd.sy} stroke={theme.accent} strokeWidth={2} markerEnd="url(#arrowhead)" />
+              <defs>
+                <marker id="arrowhead" markerWidth={8} markerHeight={8} refX={4} refY={4} orient="auto">
+                  <path d="M0,0 L8,4 L0,8 Z" fill={theme.accent} />
+                </marker>
+              </defs>
+              {/* カメラマーカー(ドラッグして移動可能) */}
+              <circle
+                cx={markerPos.sx}
+                cy={markerPos.sy}
+                r={10}
+                fill={theme.mode === 'dark' ? '#0e7490' : '#0891b2'}
+                stroke={theme.accent}
+                strokeWidth={2}
+                style={{ cursor: 'grab', touchAction: 'none' }}
+                onPointerDown={handleMarkerPointerDown}
+                onPointerMove={handleMarkerPointerMove}
+                onPointerUp={handleMarkerPointerUp}
+              />
+            </svg>
+            <p style={s.hint}>カメラのマーカー(水色の丸)は、間取り図上でドラッグしても移動できます。</p>
+          </section>
+        </div>
 
-            {/* 向き(矢印) */}
-            <line x1={markerPos.sx} y1={markerPos.sy} x2={arrowEnd.sx} y2={arrowEnd.sy} stroke={theme.accent} strokeWidth={2} markerEnd="url(#arrowhead)" />
-            <defs>
-              <marker id="arrowhead" markerWidth={8} markerHeight={8} refX={4} refY={4} orient="auto">
-                <path d="M0,0 L8,4 L0,8 Z" fill={theme.accent} />
-              </marker>
-            </defs>
-            {/* カメラマーカー(ドラッグして移動可能) */}
-            <circle
-              cx={markerPos.sx}
-              cy={markerPos.sy}
-              r={10}
-              fill={theme.mode === 'dark' ? '#0e7490' : '#0891b2'}
-              stroke={theme.accent}
-              strokeWidth={2}
-              style={{ cursor: 'grab', touchAction: 'none' }}
-              onPointerDown={handleMarkerPointerDown}
-              onPointerMove={handleMarkerPointerMove}
-              onPointerUp={handleMarkerPointerUp}
-            />
-          </svg>
-          <p style={s.hint}>カメラのマーカー(水色の丸)は、間取り図上でドラッグしても移動できます。</p>
-
-          <div style={s.fieldRow}>
-            <span style={s.fieldLabel}>高さ</span>
-            <input
-              type="range" min={HEIGHT_LIMITS.min} max={HEIGHT_LIMITS.max} step={HEIGHT_LIMITS.step}
-              value={draftMount.y} onChange={(e) => handleHeightChange(e.target.value)} style={s.range}
-            />
-            <span style={s.unit}>{draftMount.y.toFixed(1)}m</span>
-          </div>
-
-          <div style={s.fieldRow}>
-            <span style={s.fieldLabel}>向き</span>
-            <input
-              type="range" min={0} max={359} step={1} value={Math.round(draftYaw)} disabled={draftMode === 'wall'}
-              onChange={(e) => handleYawChange(e.target.value)} style={s.range}
-            />
-            <span style={s.unit}>{Math.round(draftYaw)}°</span>
-          </div>
-          {draftMode === 'wall' && (
-            <p style={s.hint}>「壁に固定」では向きは壁の内向きに自動設定されます。「自由配置」に切り替えると自由に回転できます。</p>
-          )}
-
-          <div style={s.fieldRow}>
-            <span style={s.fieldLabel}>上下角度</span>
-            <input
-              type="range" min={PITCH_LIMITS.min} max={PITCH_LIMITS.max} step={PITCH_LIMITS.step}
-              value={draftPitch} onChange={(e) => handlePitchChange(e.target.value)} style={s.range}
-            />
-            <span style={s.unit}>{draftPitch > 0 ? `↓${draftPitch}°` : draftPitch < 0 ? `↑${-draftPitch}°` : '0°'}</span>
-          </div>
-          <p style={s.hint}>カメラの上下の傾き(チルト角)です。値が大きいほど下向きに、小さい(マイナス)ほど上向きになります。「カメラの視点」プレビューに反映されます。</p>
-
-          <div style={s.fieldRow}>
-            <span style={s.fieldLabel}>視野角</span>
-            <input
-              type="range" min={FOV_LIMITS.min} max={FOV_LIMITS.max} step={FOV_LIMITS.step}
-              value={draftFov} onChange={(e) => handleFovChange(e.target.value)} style={s.range}
-            />
-            <span style={s.unit}>{draftFov}°</span>
-          </div>
-
-          <div style={s.btnRow}>
-            <button style={s.primaryBtn} onClick={handleSave}>この位置で保存</button>
-            <button style={s.ghostBtn} onClick={handleReset}>初期設定(短辺中央)に戻す</button>
-          </div>
-          {saved && <div style={s.savedNote}>保存しました。見守りダッシュボードに反映されています。</div>}
-        </section>
-
-        <section style={s.card}>
-          <div style={s.previewHeader}>
-            <h3 style={{ ...s.h3, margin: 0 }}>プレビュー</h3>
-            <div style={s.toggleGroup}>
-              <button
-                onClick={() => setPreviewMode('overview')}
-                style={{ ...s.toggleBtn, ...(previewMode === 'overview' ? s.toggleBtnActive : {}) }}
-              >
-                俯瞰3D
-              </button>
-              <button
-                onClick={() => setPreviewMode('pov')}
-                style={{ ...s.toggleBtn, ...(previewMode === 'pov' ? s.toggleBtnActive : {}) }}
-              >
-                カメラの視点
-              </button>
+        <div style={s.col}>
+          <section style={s.card}>
+            <div style={s.previewHeader}>
+              <h3 style={{ ...s.h3, margin: 0 }}>プレビュー</h3>
+              <div style={s.toggleGroup}>
+                <button
+                  onClick={() => setPreviewMode('overview')}
+                  style={{ ...s.toggleBtn, ...(previewMode === 'overview' ? s.toggleBtnActive : {}) }}
+                >
+                  自由視点
+                </button>
+                <button
+                  onClick={() => setPreviewMode('pov')}
+                  style={{ ...s.toggleBtn, ...(previewMode === 'pov' ? s.toggleBtnActive : {}) }}
+                >
+                  カメラの視点
+                </button>
+              </div>
             </div>
-          </div>
-          <p style={s.desc}>保存前でもここに反映されます。「カメラの視点」で実際の見え方を確認できます。</p>
-          <div style={s.previewWrap}>
-            <RoomScene
-              viewMode={previewMode}
-              people={[]}
-              previewCameraMount={draftMount}
-              previewCameraYawDeg={draftYaw}
-              previewCameraPitchDeg={draftPitch}
-              previewCameraFovDeg={draftFov}
-              solidWalls
-            />
-          </div>
-        </section>
+            <p style={s.desc}>保存前でもここに反映されます。「カメラの視点」で実際の見え方を確認できます。</p>
+            <div style={s.previewWrap}>
+              <RoomScene
+                viewMode={previewMode}
+                people={[]}
+                previewCameraMount={draftMount}
+                previewCameraYawDeg={draftYaw}
+                previewCameraPitchDeg={draftPitch}
+                previewCameraFovDeg={draftFov}
+                previewCameraRangeM={draftRange}
+                solidWalls
+              />
+            </div>
+          </section>
+        </div>
+
+        <div style={s.col}>
+          <section style={s.card}>
+            <h3 style={s.h3}>設置方法</h3>
+            <div style={s.shapeTabs}>
+              <button onClick={() => handleModeChange('wall')} style={{ ...s.shapeTab, ...(draftMode === 'wall' ? s.shapeTabActive : {}) }}>壁に固定</button>
+              <button onClick={() => handleModeChange('free')} style={{ ...s.shapeTab, ...(draftMode === 'free' ? s.shapeTabActive : {}) }}>自由配置</button>
+            </div>
+
+            <div style={s.fieldRow}>
+              <span style={s.fieldLabel}>高さ</span>
+              <input
+                type="range" min={HEIGHT_LIMITS.min} max={HEIGHT_LIMITS.max} step={HEIGHT_LIMITS.step}
+                value={draftMount.y} onChange={(e) => handleHeightChange(e.target.value)} style={s.range}
+              />
+              <span style={s.unit}>{draftMount.y.toFixed(1)}m</span>
+            </div>
+
+            <div style={s.fieldRow}>
+              <span style={s.fieldLabel}>向き</span>
+              <input
+                type="range" min={0} max={359} step={1} value={Math.round(draftYaw)} disabled={draftMode === 'wall'}
+                onChange={(e) => handleYawChange(e.target.value)} style={s.range}
+              />
+              <span style={s.unit}>{Math.round(draftYaw)}°</span>
+            </div>
+            {draftMode === 'wall' && (
+              <p style={s.hint}>「壁に固定」では向きは壁の内向きに自動設定されます。「自由配置」に切り替えると自由に回転できます。</p>
+            )}
+
+            <div style={s.fieldRow}>
+              <span style={s.fieldLabel}>上下角度</span>
+              <input
+                type="range" min={PITCH_LIMITS.min} max={PITCH_LIMITS.max} step={PITCH_LIMITS.step}
+                value={draftPitch} onChange={(e) => handlePitchChange(e.target.value)} style={s.range}
+              />
+              <span style={s.unit}>{draftPitch > 0 ? `↓${draftPitch}°` : draftPitch < 0 ? `↑${-draftPitch}°` : '0°'}</span>
+            </div>
+            <p style={s.hint}>カメラの上下の傾き(チルト角)です。値が大きいほど下向きに、小さい(マイナス)ほど上向きになります。「カメラの視点」プレビューに反映されます。</p>
+
+            <div style={s.fieldRow}>
+              <span style={s.fieldLabel}>視野角</span>
+              <input
+                type="range" min={FOV_LIMITS.min} max={FOV_LIMITS.max} step={FOV_LIMITS.step}
+                value={draftFov} onChange={(e) => handleFovChange(e.target.value)} style={s.range}
+              />
+              <span style={s.unit}>{draftFov}°</span>
+            </div>
+
+            <div style={s.fieldRow}>
+              <span style={s.fieldLabel}>見える範囲</span>
+              <input
+                type="range" min={RANGE_LIMITS.min} max={RANGE_LIMITS.max} step={RANGE_LIMITS.step}
+                value={draftRange} onChange={(e) => handleRangeChange(e.target.value)} style={s.range}
+              />
+              <span style={s.unit}>{draftRange}m</span>
+            </div>
+            <p style={s.hint}>間取り図・3Dプレビューに表示する視野角の扇形を、どこまでの距離で描くかの目安です。</p>
+
+            <div style={s.btnRow}>
+              <button style={s.primaryBtn} onClick={handleSave}>この位置で保存</button>
+              <button style={s.ghostBtn} onClick={handleReset}>初期設定(短辺中央)に戻す</button>
+            </div>
+            {saved && <div style={s.savedNote}>保存しました。見守りダッシュボードに反映されています。</div>}
+          </section>
+        </div>
       </div>
     </div>
   );
@@ -347,12 +388,11 @@ function makeStyles(theme) {
     svgBg,
     page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
-    h3: { margin: '14px 0 8px', fontSize: 15.5, color: theme.textStrong },
+    h3: { margin: '0 0 8px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
-    // 他の設定画面(部屋の設定・接続状況など)と統一感を持たせるため、
-    // カードは3列のグリッドに並べる(このページはカードが2枚のため、
-    // 3列目は空くが、それでよい)。
+    // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
     grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
     card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     hint: { fontSize: 12.5, color: theme.textFaint, lineHeight: 1.6, margin: '4px 0 8px' },

@@ -19,6 +19,8 @@ export default function StatusBar({
   onAddDummy,
   onClearDummies,
   dummyKeyHelp,
+  heatmapOn,
+  onToggleHeatmap,
 }) {
   const { theme } = useTheme();
   const s = useMemo(() => makeStyles(theme), [theme]);
@@ -66,7 +68,7 @@ export default function StatusBar({
         <button
           onClick={onAddDummy}
           style={s.toggleBtn}
-          title="人物を模したダミーを部屋の中央付近に置きます。クリックして選択後、矢印キーで移動、数字キー(1〜9)で転倒・誤飲・危険エリア侵入などの危険行為を模擬発生できます。"
+          title="人物を模したダミーを部屋の中央付近に置きます。クリックして選択後、矢印キーで移動、数字キー(1〜9)で転倒・誤飲・危険エリアへの接近などの危険行為を模擬発生できます。"
         >
           🧍 ダミーを置く
         </button>
@@ -89,13 +91,24 @@ export default function StatusBar({
           onClick={() => onViewModeChange('overview')}
           style={{ ...s.toggleBtn, ...(viewMode === 'overview' ? s.toggleBtnActive : {}) }}
         >
-          俯瞰3D
+          自由視点
         </button>
         <button
           onClick={() => onViewModeChange('pov')}
           style={{ ...s.toggleBtn, ...(viewMode === 'pov' ? s.toggleBtnActive : {}) }}
         >
           カメラの視点
+        </button>
+        <span style={s.rightSep} />
+        {/* 「見守りダッシュボードにもヒートマップを表示できるボタンがほしい」
+            という要望への対応。既定では非表示にしておき、押すと「危険行為の履歴」
+            タブと同じ考え方の発生密度ヒートマップを床に重ねて表示する。 */}
+        <button
+          onClick={onToggleHeatmap}
+          style={{ ...s.toggleBtn, ...(heatmapOn ? s.toggleBtnActive : {}) }}
+          title="危険行為の履歴をもとにした発生密度ヒートマップを、部屋の床に重ねて表示します"
+        >
+          ヒートマップ
         </button>
       </div>
     </div>
@@ -175,7 +188,7 @@ function makeStyles(theme) {
     toggleBtnActive: {
       background: theme.accentSoft,
       color: theme.accent,
-      borderColor: theme.accentBorder,
+      border: `1px solid ${theme.accentBorder}`,
     },
   };
 }

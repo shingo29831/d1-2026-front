@@ -274,7 +274,65 @@ export default function RoomSetupPage() {
         変更はこの端末のブラウザに保存され、見守りダッシュボードにすぐ反映されます。
       </p>
 
+      {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」という要望に合わせて、
+          3列を明確に役割分担させている。左列=②で選んだ形をそのまま確認・編集できる
+          2Dの間取り図、中央列=3Dプレビュー、右列=①②③④の詳細設定を縦に並べたもの。 */}
       <div style={s.grid}>
+        <div style={s.col}>
+          <section style={s.card}>
+            <h3 style={s.h3}>間取り図{shapeType === 'custom' ? '(クリックして頂点を追加)' : '(プレビュー)'}</h3>
+            <svg
+              width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`}
+              style={{ ...s.svg, cursor: shapeType === 'custom' ? 'crosshair' : 'default' }}
+              onClick={handleSvgClick}
+            >
+              <rect x={0} y={0} width={SVG_W} height={SVG_H} fill={s.svgBg} />
+              {shapeType === 'custom' && bgImageUrl && (
+                <image
+                  href={bgImageUrl}
+                  x={SVG_W / 2 - bgImageWidthSvg / 2}
+                  y={SVG_H / 2 - bgImageHeightSvg / 2}
+                  width={bgImageWidthSvg}
+                  height={bgImageHeightSvg}
+                  opacity={bgImageOpacity}
+                  preserveAspectRatio="none"
+                  style={{ pointerEvents: 'none' }}
+                />
+              )}
+              {previewFootprint.length >= 3 && (
+                <polygon points={polygonPoints} fill={theme.accentSoft} stroke={theme.accent} strokeWidth={2} fillOpacity={bgImageUrl ? 0.35 : 1} />
+              )}
+              {shapeType === 'custom' && customPoints.map((p, i) => {
+                const { sx, sy } = roomToSvg(p.x, p.z);
+                return (
+                  <circle
+                    key={i} cx={sx} cy={sy} r={6} fill={theme.panelBg} stroke={theme.accent} strokeWidth={2}
+                    onClick={(e) => { e.stopPropagation(); removePoint(i); }} style={{ cursor: 'pointer' }}
+                  />
+                );
+              })}
+            </svg>
+          </section>
+        </div>
+
+        <div style={s.col}>
+          <section style={s.card}>
+            <h3 style={s.h3}>3Dプレビュー</h3>
+            <p style={s.desc}>①の内容を変更すると、保存前でもここに反映されます。</p>
+            <div style={s.previewWrap}>
+              <RoomScene
+                viewMode="overview"
+                people={[]}
+                previewFootprint={previewFootprint}
+                previewHeight={clampNum(Number(height) || 2.6, 'height')}
+                previewShapeType={shapeType}
+                solidWalls
+              />
+            </div>
+          </section>
+        </div>
+
+        <div style={s.col}>
           <section style={s.card}>
             <h3 style={s.h3}>① 部屋の形を作成する</h3>
 
@@ -500,56 +558,7 @@ export default function RoomSetupPage() {
               <button style={s.ghostBtn} onClick={resetWalls}>初期設定の間仕切り壁に戻す</button>
             </div>
           </section>
-
-          <section style={s.card}>
-            <h3 style={s.h3}>間取り図{shapeType === 'custom' ? '(クリックして頂点を追加)' : '(プレビュー)'}</h3>
-            <svg
-              width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-              style={{ ...s.svg, cursor: shapeType === 'custom' ? 'crosshair' : 'default' }}
-              onClick={handleSvgClick}
-            >
-              <rect x={0} y={0} width={SVG_W} height={SVG_H} fill={s.svgBg} />
-              {shapeType === 'custom' && bgImageUrl && (
-                <image
-                  href={bgImageUrl}
-                  x={SVG_W / 2 - bgImageWidthSvg / 2}
-                  y={SVG_H / 2 - bgImageHeightSvg / 2}
-                  width={bgImageWidthSvg}
-                  height={bgImageHeightSvg}
-                  opacity={bgImageOpacity}
-                  preserveAspectRatio="none"
-                  style={{ pointerEvents: 'none' }}
-                />
-              )}
-              {previewFootprint.length >= 3 && (
-                <polygon points={polygonPoints} fill={theme.accentSoft} stroke={theme.accent} strokeWidth={2} fillOpacity={bgImageUrl ? 0.35 : 1} />
-              )}
-              {shapeType === 'custom' && customPoints.map((p, i) => {
-                const { sx, sy } = roomToSvg(p.x, p.z);
-                return (
-                  <circle
-                    key={i} cx={sx} cy={sy} r={6} fill={theme.panelBg} stroke={theme.accent} strokeWidth={2}
-                    onClick={(e) => { e.stopPropagation(); removePoint(i); }} style={{ cursor: 'pointer' }}
-                  />
-                );
-              })}
-            </svg>
-          </section>
-
-          <section style={s.card}>
-            <h3 style={s.h3}>3Dプレビュー</h3>
-            <p style={s.desc}>①の内容を変更すると、保存前でもここに反映されます。</p>
-            <div style={s.previewWrap}>
-              <RoomScene
-                viewMode="overview"
-                people={[]}
-                previewFootprint={previewFootprint}
-                previewHeight={clampNum(Number(height) || 2.6, 'height')}
-                previewShapeType={shapeType}
-                solidWalls
-              />
-            </div>
-          </section>
+        </div>
       </div>
     </div>
   );
@@ -563,9 +572,11 @@ function makeStyles(theme) {
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 8px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
-    // カード(①②③…)を3列のグリッドに並べる。カード数が3の倍数でない場合は
-    // 最後の行が埋まりきらないが、それでよい(空欄が残るだけで崩れない)。
+    // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
+    // 左列・中央列はカード1枚ずつ、右列は①②③④の詳細設定カードを縦に積む
+    // (colスタイルでflex-direction:columnにして積む)。
     grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
     card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     hint: { fontSize: 12.5, color: theme.textMuted, lineHeight: 1.6, margin: '6px 0 10px' },

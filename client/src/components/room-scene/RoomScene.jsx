@@ -8,6 +8,9 @@ import PersonFigure from '../dashboard/PersonFigure';
 import DangerZoneMarkers from './DangerZoneMarkers';
 import DoorSensorMarkers from './DoorSensorMarkers';
 import CameraMount from './CameraMount';
+import HeatmapOverlay3D from './HeatmapOverlay3D';
+import HeatmapHotspots from './HeatmapHotspots';
+import Canvas3DErrorBoundary from './Canvas3DErrorBoundary';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds } from '../../roomShapes';
@@ -49,10 +52,13 @@ export default function RoomScene({
   previewCameraYawDeg,
   previewCameraPitchDeg,
   previewCameraFovDeg,
+  previewCameraRangeM,
   previewFurniture,
   previewZones,
   previewDoorSensors,
   solidWalls,
+  showHeatmap,
+  heatmapIncidents,
 }) {
   const {
     footprint: ctxFootprint,
@@ -122,6 +128,18 @@ export default function RoomScene({
   // 見ている先(lookAt)は、カメラの向き(yaw=左右)と上下角度(pitch)から求めた
   // 方向ベクトルを、設置位置から一定距離(3m)先へ伸ばした点にしている
   // (yawDegToDirと同じsin/cosの向き定義に合わせ、pitchは正の値ほど下向き)。
+  // 【重要・不具合修正】「壁に固定」モードでは、cameraMount.x/zは壁の中心線
+  // (roomShapes.jsのnearestEdgePointが返す、壁の厚み0.08mの箱ジオメトリの
+  // まさに中心)にぴったり合わせて配置される。そのため、以前はPOVカメラの
+  // 位置をcameraMountの座標そのまま使っていたため、カメラが壁のメッシュの
+  // 内部から始まってしまい、ニアクリップ面が壁を突き抜けて、画面全体が
+  // 壁の内側に埋まったように見える(手前の壁が画面いっぱいに歪んで見える)
+  // 不具合があった。カメラが向いている方向(yaw)へわずかに(壁の厚みより
+  // 十分外側に出る距離)前進させた位置を実際の視点位置とすることで、壁の
+  // メッシュの外(部屋の内側)からPOVが始まるようにしている。
+  // 「自由配置」モードなど壁際でない場合でも、この程度のオフセットは
+  // 見た目にほとんど影響しない。
+  const WALL_CLEARANCE_M = 0.18;
   const povCamera = useMemo(() => {
     const yawRad = (cameraYawDeg * Math.PI) / 180;
     const pitchRad = (cameraPitchDeg * Math.PI) / 180;
@@ -129,24 +147,28 @@ export default function RoomScene({
     const dirX = Math.sin(yawRad) * Math.cos(pitchRad);
     const dirY = -Math.sin(pitchRad);
     const dirZ = Math.cos(yawRad) * Math.cos(pitchRad);
+    // 前進オフセットは上下角度(pitch)の影響を受けない水平方向(yaw)成分のみ
+    // で計算する(壁は垂直面のため、壁から離れる方向は常に水平でよい)。
+    const clearX = Math.sin(yawRad) * WALL_CLEARANCE_M;
+    const clearZ = Math.cos(yawRad) * WALL_CLEARANCE_M;
+    const povX = cameraMount.x + clearX;
+    const povY = cameraMount.y;
+    const povZ = cameraMount.z + clearZ;
     return {
-      position: [cameraMount.x, cameraMount.y, cameraMount.z],
+      position: [povX, povY, povZ],
       fov: cameraFovDeg,
       lookAt: [
-        cameraMount.x + dirX * lookDist,
-        cameraMount.y + dirY * lookDist,
-        cameraMount.z + dirZ * lookDist,
+        povX + dirX * lookDist,
+        povY + dirY * lookDist,
+        povZ + dirZ * lookDist,
       ],
     };
   }, [cameraMount.x, cameraMount.y, cameraMount.z, cameraYawDeg, cameraPitchDeg, cameraFovDeg]);
 
-  // 床のグリッドは部屋のサイズに合わせて表示する(常に固定サイズの巨大なグリッドを
-  // 敷いていると、小さい部屋では間延びして見え、俯瞰視点によっては壁の外側が
-  // 急に真っ暗な靄のように見えてしまっていたため、部屋の大きさに応じたサイズにする)
-  const gridSize = Math.max(bounds.width, bounds.depth) * 1.6 + 2;
-  const gridDivisions = Math.max(4, Math.round(gridSize * 2));
-
   return (
+    // Canvas(WebGL)内で何らかの例外が起きても画面全体が真っ白にならないよう、
+    // この3D表示部分だけを局所的に受け止めるエラー境界で包む。
+    <Canvas3DErrorBoundary>
     <Canvas shadows camera={{ position: overviewCamera.position, fov: overviewCamera.fov }}>
       {/* 背景色をテーマに合わせた明るめの色にし、遠景フォグは使わない。
           以前は黒に近い背景色+濃いフォグの組み合わせのため、俯瞰視点で
@@ -175,12 +197,19 @@ export default function RoomScene({
         <PlaceholderRoom footprint={previewFootprint} height={isRoomPreview ? previewHeight : undefined} furniture={furniture} showInteriorWalls={showInteriorWalls} solidWalls={solidWalls} />
       )}
 
-      <CameraMount
-        mount={previewCameraMount}
-        yawDeg={previewCameraYawDeg}
-        pitchDeg={previewCameraPitchDeg}
-        fovDeg={previewCameraFovDeg}
-      />
+      {/* 「カメラの視点」表示中は、見ている本人の視点のすぐそば(あるいは
+          視界の中)にカメラ自身の筐体・レンズ・視野角の扇形を表示しても
+          意味がなく、むしろ視界の邪魔になるだけなので非表示にする
+          (自由視点や各設定タブのプレビューでは従来通り表示する)。 */}
+      {viewMode !== 'pov' && (
+        <CameraMount
+          mount={previewCameraMount}
+          yawDeg={previewCameraYawDeg}
+          pitchDeg={previewCameraPitchDeg}
+          fovDeg={previewCameraFovDeg}
+          rangeM={previewCameraRangeM}
+        />
+      )}
 
       <DangerZoneMarkers peopleFloors={list.map((p) => p.floor)} zones={zones} />
       <DoorSensorMarkers doorSensors={doorSensors} />
@@ -196,9 +225,31 @@ export default function RoomScene({
         />
       ))}
 
-      <gridHelper args={[gridSize, gridDivisions, theme.sceneGrid1, theme.sceneGrid2]} position={[0, 0.001, 0]} />
+      {/* 「見守りダッシュボードにもヒートマップを表示できるボタンがほしい」という
+          要望を受けて追加した、危険行為の履歴に基づく発生密度ヒートマップの重ね
+          表示。「危険行為の履歴」タブの3Dヒートマップと同じ計算(incidentHeatmap.js)
+          を使う。既定では非表示で、StatusBarの「ヒートマップ」ボタンを押した
+          ときだけ表示する(showHeatmap)。 */}
+      {showHeatmap && (
+        <HeatmapOverlay3D incidents={heatmapIncidents} footprint={footprint} />
+      )}
+
+      {/* 「ヒートマップボタンを押したらそこから吹き出しが出て、危険行為が多い
+          場所で何が起きたか＋直近3件を見られるようにしてほしい」という要望を
+          受けて追加。上のHeatmapOverlay3D(色の濃淡)とは別に、実際の履歴を
+          クリック可能な件数バッジとして重ね、押すとカテゴリ内訳+直近3件の
+          吹き出しを開く。表示条件はHeatmapOverlay3Dと同じ(showHeatmap)。 */}
+      {showHeatmap && (
+        <HeatmapHotspots incidents={heatmapIncidents} />
+      )}
+
+      {/* 【不具合修正】以前は床にgridHelper(方眼状の網目模様)を重ねて表示していたが、
+          「3D表示の下のあみあみ(網目)を消してほしい」という要望を受けて削除した。
+          床のサイズ感は床面(PlaceholderRoom.jsxのmeshStandardMaterial)自体の
+          陰影・部屋の外形線だけで十分伝わるため、削除しても部屋の見え方に支障はない。 */}
 
       <CameraRig viewMode={viewMode} overviewCamera={overviewCamera} povCamera={povCamera} />
     </Canvas>
+    </Canvas3DErrorBoundary>
   );
 }

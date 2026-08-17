@@ -4,11 +4,13 @@ import NotificationPanel from './NotificationPanel';
 import KeyLegendOverlay from './KeyLegendOverlay';
 import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
-import { footprintBounds, footprintCenter } from '../../roomShapes';
+import { footprintBounds, footprintCenter, footprintEdges } from '../../roomShapes';
 import { isInsideZone } from '../../poseGeometry';
-import { isPositionBlocked } from '../../roomCollision';
+import { isPositionBlocked, resolveSafePosition } from '../../roomCollision';
 import { THRESHOLDS } from '../../config';
 import { useTheme } from '../../themeContext';
+import { getIncidentsSortedDesc } from '../../incidentHistory';
+import { fetchIncidentsSortedDesc } from '../../historyApi';
 
 const DUMMY_STEP_M = 0.15; // 矢印キー1回あたりの移動量
 let dummyIdSeq = 0;
@@ -17,7 +19,7 @@ function clamp(v, lo, hi) {
   return Math.min(hi, Math.max(lo, v));
 }
 
-// 【重要】転倒検知・危険エリア侵入・開閉センサーの通知など(useMonitoringAlerts)は、
+// 【重要】転倒検知・危険エリアへの接近・開閉センサーの通知など(useMonitoringAlerts)は、
 // 以前はこのコンポーネント内で直接呼び出していたが、それだと見守りダッシュボードを
 // 表示していない間(他の設定タブを見ている間)は検出・通知の評価そのものが止まって
 // しまっていた(「今表示しているページだけをマウントする」というパフォーマンス対策の
@@ -46,6 +48,40 @@ export default function MonitoringDashboard({
   const { theme } = useTheme();
   const { footprint, zones, walls, furniture, roomShapeType } = useRoomConfig();
 
+  // --------------------------------------------------------------
+  // ヒートマップ表示(「見守りダッシュボードにもヒートマップを表示できる
+  // ボタンがほしい」という要望への対応)。既定では非表示にしておき、
+  // StatusBarの「ヒートマップ」ボタンを押したときだけ、危険行為の履歴に
+  // 基づく発生密度ヒートマップを俯瞰3Dの床に重ねて表示する。
+  // 計算・見た目は「危険行為の履歴」タブの3Dヒートマップ(HistoryPage.jsx /
+  // IncidentHeatmap3D.jsx)と同じロジック(incidentHeatmap.js)を使う。
+  // --------------------------------------------------------------
+  const [showHeatmap, setShowHeatmap] = useState(false);
+  const [heatmapHistoryState, setHeatmapHistoryState] = useState(() => ({
+    incidents: getIncidentsSortedDesc(),
+    source: 'mock',
+  }));
+  useEffect(() => {
+    let cancelled = false;
+    fetchIncidentsSortedDesc().then((result) => {
+      if (!cancelled) setHeatmapHistoryState(result);
+    });
+    return () => { cancelled = true; };
+  }, []);
+  const heatmapRoomCenter = useMemo(() => footprintCenter(footprint), [footprint]);
+  // historyApi.js経由の実データは、位置(x, z)が不明な項目がx: null, z: nullで
+  // 返ってくるため、HistoryPage.jsxと同じ方針で部屋の中心に概算配置しておく
+  // (発生密度の計算(incidentHeatmap.js)自体はapprox:trueの項目を除外する)。
+  const heatmapIncidents = useMemo(
+    () => heatmapHistoryState.incidents.map((i) => (
+      i.x === null || i.x === undefined || i.z === null || i.z === undefined
+        ? { ...i, x: heatmapRoomCenter.x, z: heatmapRoomCenter.z, approx: true }
+        : i
+    )),
+    [heatmapHistoryState.incidents, heatmapRoomCenter],
+  );
+  const toggleHeatmap = useCallback(() => setShowHeatmap((v) => !v), []);
+
   const hasPerson = !!primaryPerson && !isLost;
   const confidencePct = hasPerson ? Math.round(primaryPerson.avgConf * 100) : 0;
   const fallen = hasPerson && primaryPerson.aspectRatio < THRESHOLDS.FALL_ASPECT_RATIO;
@@ -57,7 +93,7 @@ export default function MonitoringDashboard({
   // 確認できるようにするための機能。矢印キーで選択中のダミーを移動できる
   // (部屋の外形の範囲内にクランプされる)。
   //
-  // 【矢印キーでの移動 → 危険エリア侵入の自動検知】
+  // 【矢印キーでの移動 → 危険エリアへの接近の自動検知】
   // ダミーを矢印キーで動かして「家具・エリアの設定」タブで設定した危険/注意
   // エリアの矩形内に実際に入ると、実際のYOLO検出時と同じ仕組み(下の
   // dummyZoneMembership監視用useEffect参照)で自動的に危険通知が発生する。
@@ -71,12 +107,31 @@ export default function MonitoringDashboard({
   // をそのまま使うため、通知パネルへの出方・クールダウン挙動も実検出と同じ)。
   //   1: 転倒
   //   2: 誤飲の恐れ
-  //   3〜9: 「家具・エリアの設定」タブで設定されている危険/注意エリアへの侵入
+  //   3〜9: 「家具・エリアの設定」タブで設定されている危険/注意エリアへの接近
   //         (zones配列の1件目が3、2件目が4、…という対応。最大7エリア分)
   // --------------------------------------------------------------
   const [dummies, setDummies] = useState([]); // [{ id, x, z }]
   const [selectedDummyId, setSelectedDummyId] = useState(null);
   const bounds = useMemo(() => footprintBounds(footprint), [footprint]);
+
+  // 「家具や壁にめり込ませないようにしてほしい」という要望への対応。
+  // 【重要・不具合修正】以前は外壁(部屋の外形そのもの)が衝突判定の対象に
+  // 含まれておらず、部屋の外形からの単純なクランプ(bounds.minX+0.15 など)
+  // だけに頼っていたため、L字型など長方形以外の部屋では外壁の外側(部屋の
+  // 形の外)にはみ出せてしまったり、外壁の余白がPERSON_RADIUS_M分の必要な
+  // 厚みより狭く、壁にわずかにめり込んで見えることがあった。ここで部屋の
+  // 外形(footprint)の各辺を壁として明示的に衝突判定に含めるようにする
+  // (PlaceholderRoom.jsxが実際に描画する外壁の位置と完全に一致させるため、
+  // 同じfootprintEdges()を使う)。室内の間仕切り壁(walls)は、それが実際に
+  // 表示されるとき(roomShapeType==='custom')だけ追加で含める。
+  const exteriorWalls = useMemo(
+    () => footprintEdges(footprint).map(([a, b]) => ({ x1: a.x, z1: a.z, x2: b.x, z2: b.z })),
+    [footprint]
+  );
+  const collisionWalls = useMemo(
+    () => (roomShapeType === 'custom' ? [...exteriorWalls, ...(Array.isArray(walls) ? walls : [])] : exteriorWalls),
+    [exteriorWalls, walls, roomShapeType]
+  );
 
   // 直近で押された数字キー(1〜9)。KeyLegendOverlay側で該当行を一瞬だけ
   // ハイライトする「押した瞬間のフィードバック」用。flashTimerRefで前回分の
@@ -98,9 +153,12 @@ export default function MonitoringDashboard({
     const offset = ((dummies.length % 5) - 2) * 0.4;
     const x = clamp(center.x + offset, bounds.minX + 0.2, bounds.maxX - 0.2);
     const z = clamp(center.z, bounds.minZ + 0.2, bounds.maxZ - 0.2);
-    setDummies((prev) => [...prev, { id, x, z }]);
+    // 部屋の中心付近にちょうど家具が置かれている場合に備え、置いた瞬間から
+    // 家具・壁にめり込んで見えないよう、必要なら安全な位置へ少しだけ押し出す。
+    const safe = resolveSafePosition({ x, z }, { walls: collisionWalls, furniture });
+    setDummies((prev) => [...prev, { id, x: safe.x, z: safe.z }]);
     setSelectedDummyId(id);
-  }, [dummies.length, footprint, bounds]);
+  }, [dummies.length, footprint, bounds, collisionWalls, furniture]);
 
   // ダミーごとに「現在どのエリアの中にいるか」を覚えておくための参照
   // (実検出のuseMonitoringAlerts.js内のactiveZonesと同じ「入った瞬間だけ通知する」
@@ -116,7 +174,7 @@ export default function MonitoringDashboard({
 
   // ダミーが移動して危険/注意エリアに入ったら、実際のYOLO検出時と同じように
   // 自動で危険通知を発生させる(矢印キーでの移動に連動)。数字キー3〜9による
-  // 「エリア侵入の模擬」は押した瞬間に強制的に発生させるものだったが、これは
+  // 「エリア接近の模擬」は押した瞬間に強制的に発生させるものだったが、これは
   // 実際にダミーの座標がエリアの矩形内に入ったかどうかで自動判定する点が異なる
   // (どちらも最終的にはuseMonitoringAlerts()のpushNotification経由で同じ通知
   // パネルに出るため、通知の出方・クールダウン挙動は共通)。
@@ -129,8 +187,8 @@ export default function MonitoringDashboard({
         const wasInside = membership.has(zone.id);
         if (inside && !wasInside) {
           pushNotification(`dummy_auto_zone_${d.id}_${zone.id}`, {
-            title: '危険エリアへの侵入',
-            message: `(ダミー操作) 「${zone.label.replace(/^危険[・･]?|^注意[・･]?/, '')}」に侵入しました。`,
+            title: '危険エリアに接近',
+            message: `(ダミー操作) 「${zone.label.replace(/^危険[・･]?|^注意[・･]?/, '')}」に接近しました。`,
             level: zone.type === 'danger' ? 'danger' : 'warning',
           });
         }
@@ -165,11 +223,11 @@ export default function MonitoringDashboard({
           if (e.key === 'ArrowLeft') x -= DUMMY_STEP_M;
           if (e.key === 'ArrowRight') x += DUMMY_STEP_M;
           const next = { x: clamp(x, bounds.minX + 0.15, bounds.maxX - 0.15), z: clamp(z, bounds.minZ + 0.15, bounds.maxZ - 0.15) };
-          // 家具や壁と重なる移動先には進めないようにする(以前はfootprintの範囲内
-          // であれば家具・壁を無視してすり抜けて移動できてしまっていた)。
-          // 間仕切り壁は「部屋の設定」で既定の間取り(自由な多角形)を使っている
-          // ときだけ判定に含める(PlaceholderRoom.jsxの表示条件と合わせている)。
-          if (isPositionBlocked(next, { walls, furniture, includeWalls: roomShapeType === 'custom' })) {
+          // 家具や壁(外壁・間仕切り壁の両方)と重なる移動先には進めないようにする
+          // (以前は外壁が判定に含まれておらず、footprintの範囲内であれば家具・壁を
+          // 無視してすり抜けて移動できてしまっていた)。collisionWallsには常に外壁を、
+          // 間仕切り壁は実際に表示されているとき(roomShapeType==='custom')だけ含めている。
+          if (isPositionBlocked(next, { walls: collisionWalls, furniture, includeWalls: true })) {
             return d;
           }
           return { ...d, ...next };
@@ -193,15 +251,15 @@ export default function MonitoringDashboard({
             level: 'warning',
           });
         } else {
-          // 3〜9: zones配列のN件目(N = 押したキー - 3)への侵入を模擬する。
+          // 3〜9: zones配列のN件目(N = 押したキー - 3)への接近を模擬する。
           // 「家具・エリアの設定」タブで追加したエリアもそのまま4〜9キーの
           // 対象になる(最大7エリア分)。対応するエリアが無いキーは何もしない。
           const zoneIndex = Number(e.key) - 3;
           const zone = Array.isArray(zones) ? zones[zoneIndex] : undefined;
           if (zone) {
             pushNotification(`dummy_zone_${zone.id}`, {
-              title: '危険エリアへの侵入',
-              message: `(ダミー操作) 「${zone.label.replace(/^危険[・･]?|^注意[・･]?/, '')}」に侵入しました。`,
+              title: '危険エリアに接近',
+              message: `(ダミー操作) 「${zone.label.replace(/^危険[・･]?|^注意[・･]?/, '')}」に接近しました。`,
               level: zone.type === 'danger' ? 'danger' : 'warning',
             });
           }
@@ -211,15 +269,21 @@ export default function MonitoringDashboard({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [selectedDummyId, bounds, zones, pushNotification, flashDummyKey]);
+    // 【修正】以前はwalls/furniture/collisionWallsが依存配列に無く、それらの値が
+    // 変わってもこのuseEffect内のクロージャが古い値を参照し続けてしまっていた
+    // (「部屋の設定」「家具・エリアの設定」タブで変更した直後は反映されないバグ)。
+  }, [selectedDummyId, bounds, zones, pushNotification, flashDummyKey, collisionWalls, furniture]);
 
   // 見守りシーンに表示する人物一覧(検出された全員分)。主対象(先頭の1人)には
   // 通知と連動した色を、それ以外には控えめな標準色を割り当てる。
+  // 【重要】実際のYOLO検出座標(p.floor)そのものは書き換えず、resolveSafePosition()で
+  // 「表示位置だけ」を家具・壁にめり込まないよう僅かに押し出す(危険エリア判定などは
+  // 元の座標(primaryPerson/useMonitoringAlerts側)のまま使われるため、判定結果には影響しない)。
   const people = isLost
     ? []
     : allPersons.map((p, idx) => ({
         id: idx,
-        floor: p.floor,
+        floor: resolveSafePosition(p.floor, { walls: collisionWalls, furniture }),
         fallen: p.aspectRatio < THRESHOLDS.FALL_ASPECT_RATIO,
         colorState: idx === 0 ? colorState : 'normal',
       }));
@@ -251,7 +315,7 @@ export default function MonitoringDashboard({
       { key: '2', label: '誤飲の恐れ' },
     ];
     (Array.isArray(zones) ? zones : []).slice(0, 7).forEach((zone, i) => {
-      items.push({ key: String(i + 3), label: `「${zone.label}」への侵入` });
+      items.push({ key: String(i + 3), label: `「${zone.label}」への接近` });
     });
     return items;
   }, [zones]);
@@ -281,10 +345,17 @@ export default function MonitoringDashboard({
         onAddDummy={addDummy}
         onClearDummies={clearDummies}
         dummyKeyHelp={dummyKeyHelp}
+        heatmapOn={showHeatmap}
+        onToggleHeatmap={toggleHeatmap}
       />
       <div style={styles.body}>
         <div style={styles.sceneWrap}>
-          <RoomScene viewMode={viewMode} people={[...people, ...dummyPeople]} />
+          <RoomScene
+            viewMode={viewMode}
+            people={[...people, ...dummyPeople]}
+            showHeatmap={showHeatmap}
+            heatmapIncidents={heatmapIncidents}
+          />
           {selectedDummyId && <KeyLegendOverlay items={keyLegendItems} flashKey={flashKey} />}
         </div>
         <NotificationPanel
