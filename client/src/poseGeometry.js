@@ -88,6 +88,22 @@ export function analyzePerson(keypoints, roomConfig) {
 // それが床面（Y=0）と交差する座標を数学的に算出する方式に変更しました。
 // これにより、パース（遠近感）が正確に反映され、単眼カメラでも高い精度で
 // 床の上の位置（メートル）を特定できるようになります。
+//
+// 【不具合修正】「カメラの向いている位置と3Dのカメラの向いている方向を実際に
+// 同じにしてほしい」「カメラから見て正確な位置に人を表示してほしい」という
+// 指摘を受けて、向きの基準を修正しました。以前の実装は「Three.jsのカメラは
+// -Z方向を向く」という一般的な前提でyaw/pitchの回転行列を組み立てていましたが、
+// このアプリの3D表示(RoomScene.jsxのカメラの視点=povCamera、CameraMount.jsxの
+// カメラアイコン・視野角の扇形)は、どちらも「yaw=0・pitch=0のとき+Z方向を向く」
+// という向き定義で実装されています。この2つの向き定義が食い違っていたため、
+// 検出した人物の投影方向が、実際にカメラが向いている方向(3D表示で見えている
+// カメラのレンズ・扇形の向き)とズレる(角度によっては前後・左右が逆になる)
+// 不具合がありました。
+// 下記ではforward(前方)・right(右)・up(上)の3本の基底ベクトルを、
+// RoomScene.jsxのpovCamera・CameraMount.jsxと完全に同じ式(forward.z =
+// cos(yaw)*cos(pitch) が正、など)で明示的に組み立ててから、画像上のピクセル
+// 位置に応じてこの基底ベクトルを合成する方式に変更し、3D表示上でカメラが
+// 実際に向いている方向と、人物の投影方向を一致させています。
 // -------------------------------------------------------------------
 export function imageToFloor(imgX, imgY, roomConfig) {
   const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
@@ -96,62 +112,68 @@ export function imageToFloor(imgX, imgY, roomConfig) {
   const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
 
   // 1. 画像座標を正規化デバイス座標 (NDC: -1.0 〜 1.0) に変換
-  // Three.jsのカメラ座標系に合わせ、上方向が+Y、右方向が+X
+  // 画像は左上が原点・下方向が+Yのため、ndcYは向きを反転させて
+  // 「画像の上側=+1、下側=-1」になるようにしている(カメラのローカル空間の
+  // 上方向=+Yに合わせるため)。
   const ndcX = (imgX / IMG_W) * 2 - 1;
   const ndcY = 1 - (imgY / IMG_H) * 2;
 
-  // 2. カメラのローカル空間でのレイ（方向ベクトル）を計算
   const aspect = IMG_W / IMG_H;
   const tanFov = Math.tan(((fovDeg / 2) * Math.PI) / 180);
-  
-  // カメラは-Z方向を向いている前提
-  const localDir = {
-    x: ndcX * aspect * tanFov,
-    y: ndcY * tanFov,
-    z: -1.0
+
+  // 2. カメラの向き(yaw=左右, pitch=上下)から、ワールド空間での
+  // 前方(forward)・右(right)・上(up)の3本の基底ベクトルを求める。
+  // forward: RoomScene.jsxのpovCameraのdirX/dirY/dirZとまったく同じ式
+  // (yaw=0・pitch=0のとき+Z方向を向き、yawが増えると+X方向へ、pitchが
+  // 増えると下向きへ回転する)。
+  const yawRad = (yawDeg * Math.PI) / 180;
+  const pitchRad = (pitchDeg * Math.PI) / 180;
+  const forward = {
+    x: Math.sin(yawRad) * Math.cos(pitchRad),
+    y: -Math.sin(pitchRad),
+    z: Math.cos(yawRad) * Math.cos(pitchRad),
+  };
+  // right: 水平面内のみ(カメラは左右に傾く(ロールする)ことは無い前提)。
+  // CameraMount.jsxがyaw分だけY軸回転させた箱・扇形の「右方向」と一致する。
+  const right = {
+    x: Math.cos(yawRad),
+    y: 0,
+    z: -Math.sin(yawRad),
+  };
+  // up = forward × right (右手系の外積)。pitchで傾いた分だけ、カメラの
+  // 「上」方向も一緒に傾く(カメラのレンズが下を向くほど、上面は前方向へ傾く)。
+  const up = {
+    x: forward.y * right.z - forward.z * right.y,
+    y: forward.z * right.x - forward.x * right.z,
+    z: forward.x * right.y - forward.y * right.x,
   };
 
-  // 3. Pitch（上下角度）の回転を適用（X軸周りの回転）
-  // pitchDegは正の値が「下向き」としてUIで定義されているため、数学的には負の回転
-  const pitchRad = (-pitchDeg * Math.PI) / 180;
-  const cosP = Math.cos(pitchRad);
-  const sinP = Math.sin(pitchRad);
-  
-  const pitchDir = {
-    x: localDir.x,
-    y: localDir.y * cosP - localDir.z * sinP,
-    z: localDir.y * sinP + localDir.z * cosP
+  // 3. 画像上のピクセル位置(NDC)に応じて、上記の基底ベクトルを合成し、
+  // カメラからそのピクセルの方向へ伸びる実際のレイ(方向ベクトル)を求める
+  // (前方distanceを1とした仮想フィルム面上の点への方向)。
+  const dir = {
+    x: forward.x + right.x * ndcX * aspect * tanFov + up.x * ndcY * tanFov,
+    y: forward.y + right.y * ndcX * aspect * tanFov + up.y * ndcY * tanFov,
+    z: forward.z + right.z * ndcX * aspect * tanFov + up.z * ndcY * tanFov,
   };
 
-  // 4. Yaw（左右角度）の回転を適用（Y軸周りの回転）
-  // Yawは真上から見て時計回り（北=0, 東=90）の定義。
-  const yawRad = (-yawDeg * Math.PI) / 180;
-  const cosY = Math.cos(yawRad);
-  const sinY = Math.sin(yawRad);
-
-  const worldDir = {
-    x: pitchDir.x * cosY + pitchDir.z * sinY,
-    y: pitchDir.y,
-    z: -pitchDir.x * sinY + pitchDir.z * cosY
-  };
-
-  // 5. レイと床面（Y=0）の交差判定
+  // 4. レイと床面（Y=0）の交差判定
   // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(t)で床に到達するか計算
-  if (worldDir.y >= 0) {
+  if (dir.y >= 0) {
     // レイが水平または上を向いている（床と交差しない＝空や遠くの壁を見ている）場合
     // 計算不能なため、カメラの正面遠方（仮に10m先）の座標を返す
     return {
-      x: cameraMount.x + worldDir.x * 10,
-      z: cameraMount.z + worldDir.z * 10,
+      x: cameraMount.x + dir.x * 10,
+      z: cameraMount.z + dir.z * 10,
     };
   }
 
-  const t = -cameraMount.y / worldDir.y;
+  const t = -cameraMount.y / dir.y;
 
   // 交差点（床の上の座標）
   return {
-    x: cameraMount.x + worldDir.x * t,
-    z: cameraMount.z + worldDir.z * t,
+    x: cameraMount.x + dir.x * t,
+    z: cameraMount.z + dir.z * t,
   };
 }
 
