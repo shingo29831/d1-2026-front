@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import socket from '../socket';
+import { connectIotCore } from '../iotClient';
 
 // ===================================================================
 // YOLOの検出パイプライン（Webカメラ/動画 → フレーム送信 → pose-data受信）を
@@ -74,6 +75,10 @@ export function useDetectionPipeline() {
   const [poseData, setPoseData] = useState(null);
   const [lastPoseAt, setLastPoseAt] = useState(null);
 
+  // AWS IoT Core (本番環境) の接続状態と受信メッセージ
+  const [iotConnected, setIotConnected] = useState(false);
+  const [iotMessage, setIotMessage] = useState(null);
+
   // Webカメラを(再)起動する。
   // 「Webカメラを使用」ボタンはこの関数を直接呼び出すようにしており、既にwebcamモードで
   // あっても押すたびに必ずgetUserMediaをやり直す(＝再試行できる)ようにしている。
@@ -126,6 +131,48 @@ export function useDetectionPipeline() {
       videoRef.current.play();
     }
   }, [inputMode, videoSrc, shouldCapture]);
+
+  // AWS IoT Core (本番環境) への接続とMQTTメッセージ受信
+  // 環境変数 VITE_IOT_ENDPOINT が設定されている場合のみ自動的に接続を試みます。
+  // (ローカルのSocket.IO通信と並行して動作し、両方のデータを受信できます)
+  useEffect(() => {
+    const endpoint = import.meta.env.VITE_IOT_ENDPOINT;
+    if (!endpoint) return undefined;
+
+    let isMounted = true;
+    let disconnectFn = null;
+
+    const setupIot = async () => {
+      try {
+        // iotClient.js の connectIotCore を呼び出し、コールバックでイベントを受け取る
+        disconnectFn = await connectIotCore(
+          (topic, message) => {
+            if (!isMounted) return;
+            try {
+              const data = typeof message === 'string' ? JSON.parse(message) : message;
+              setIotMessage({ topic, data, timestamp: Date.now() });
+            } catch (err) {
+              console.warn('[IoT] メッセージのパースに失敗しました:', err);
+            }
+          },
+          () => { if (isMounted) setIotConnected(true); },
+          () => { if (isMounted) setIotConnected(false); },
+          (err) => { console.error('[IoT] 接続エラー:', err); }
+        );
+      } catch (err) {
+        console.error('[IoT] 初期化エラー:', err);
+      }
+    };
+
+    setupIot();
+
+    return () => {
+      isMounted = false;
+      if (typeof disconnectFn === 'function') {
+        disconnectFn();
+      }
+    };
+  }, []);
 
   // socket.io: 接続状態 & pose-data受信
   useEffect(() => {
@@ -195,6 +242,8 @@ export function useDetectionPipeline() {
     connected,
     poseData,
     lastPoseAt,
+    iotConnected,
+    iotMessage,
     shouldCapture,
     cameraError,
     requestWebcam,
