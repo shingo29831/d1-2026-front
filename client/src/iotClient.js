@@ -1,20 +1,10 @@
 // ===================================================================
-// AWS IoT Core への MQTT over WebSocket 接続の準備コード。
+// AWS IoT Core への MQTT over WebSocket 接続コード。
 //
 // 【Role C仕様書 Step 3「MQTT over WebSocketの受信」との対応】
 // ROLE_C_SPEC_ALIGNMENT.md にある「SigV4署名付きURL生成・IoT Core接続」の
-// 実体。ただし【重要】このファイルの関数は、現時点ではアプリのどこからも
-// 呼び出されていない(=UIには配線されていない、準備・下ごしらえのみ)。
-// 理由: 実際にsubscribeすべきMQTTトピック名(Role Aの検出結果がどのトピックに
-// publishされるか)がまだ共有されていないため。実際に接続するには
-// 最低限そのトピック名が必要。
-//
-// 本番化する際の想定手順:
-//   1. Role Aから実際のMQTTトピック名(例: `iot/{deviceId}/pose` 等、仮)を受領する
-//   2. hooks/useDetectionPipeline.js 内の `socket.on('pose-data', ...)` (Socket.IO)を
-//      このファイルの `connectIotCore(topic, onMessage)` に置き換える
-//   3. StatusBar.jsxの接続状態表示の文言も「サーバー接続中」から
-//      「IoT Core接続中」のような表現に更新する
+// 実体。useDetectionPipeline.js から呼び出され、指定されたトピックを
+// Subscribe してリアルタイムアラートを受信します。
 //
 // 仕組み(このファイルがやっていること):
 //   1. ログイン中ユーザーのCognito Identity Poolから一時AWSクレデンシャルを取得する
@@ -155,48 +145,112 @@ export async function getSignedIotWebSocketUrl() {
 }
 
 // 実際にAWS IoT CoreへMQTT接続し、指定トピックをsubscribeする。
-// 【現状どこからも呼ばれていない】Role AのMQTTトピック名が判明し、
-// useDetectionPipeline.js等から実際に呼び出す準備ができてから使用する。
-//
-// 使い方(将来の想定。useMonitoringAlerts()が返すpushNotificationと組み合わせる例):
-//   const client = await connectIotCore('iot/device1/alerts', (topic, payload) => {
-//     const notif = describeIotEvent(payload); // 仕様書のJSONを通知の形に変換(下記関数)
-//     if (notif) pushNotification(notif.key, notif);
-//   });
-//   ...
-//   client.end(); // クリーンアップ時
-export async function connectIotCore(topic, onMessage) {
-  const mqttModule = await import('mqtt');
-  // Vite環境でのESM/CommonJSの差異を吸収し、ライブラリ本体を正しく取得する
-  const mqttClient = mqttModule.default || mqttModule;
-  const url = await getSignedIotWebSocketUrl();
-  const client = mqttClient.connect(url, {
-    protocolVersion: 4,
-    clean: true,
-    reconnectPeriod: 4000,
-    // IoT CoreのMQTT over WebSocketは接続ごとに一意なクライアントIDが必要。
-    clientId: `system1-web-${Math.random().toString(16).slice(2)}`,
-  });
+// useDetectionPipeline.js から呼び出され、アプリ全体で1つのMQTT接続を維持する。
+export async function connectIotCore(topic, onMessage, onConnect, onDisconnect, onError) {
+  let client = null;
+  let isClosed = false;
+  let reconnectTimer = null;
 
-  client.on('connect', () => {
-    if (topic) client.subscribe(topic);
-  });
-
-  client.on('message', (receivedTopic, payloadBuffer) => {
-    const text = payloadBuffer.toString();
+  async function connect() {
+    if (isClosed) return;
     try {
-      onMessage?.(receivedTopic, JSON.parse(text));
-    } catch {
-      onMessage?.(receivedTopic, text);
+      const mqttModule = await import('mqtt');
+      // Vite環境でのESM/CommonJSの差異を吸収し、ライブラリ本体を正しく取得する
+      const mqttClient = mqttModule.default || mqttModule;
+      
+      // 接続のたびに最新のSigV4署名付きURLを非同期で生成する
+      const url = await getSignedIotWebSocketUrl();
+      
+      if (isClosed) return;
+
+      client = mqttClient.connect(url, {
+        protocolVersion: 4,
+        clean: true,
+        // mqtt.js内蔵の自動再接続を無効化し、カスタム再接続ロジックを使用する
+        reconnectPeriod: 0,
+        // IoT CoreのMQTT over WebSocketは接続ごとに一意なクライアントIDが必要。
+        clientId: `system1-web-${Math.random().toString(16).slice(2)}`,
+      });
+
+      client.on('connect', () => {
+        console.log('[iotClient] MQTT接続成功 (101 Switching Protocols -> MQTT CONNECT)');
+        if (topic) {
+          // Subscribeの成否をコールバックで確実に判定する
+          client.subscribe(topic, (err, granted) => {
+            if (err) {
+              console.error(`[iotClient] Subscribeリクエスト失敗:`, err);
+            } else if (granted && granted[0] && granted[0].qos === 128) {
+              // IoT Core特有のエラー: WebSocketは繋がったが、IAMポリシーでSubscribeが許可されていない
+              console.error(`[iotClient] ❌ Subscribe拒否 (QoS 128)。CognitoのIAMロールに iot:Subscribe 権限がないか、リソース制限に引っかかっています。Topic: ${topic}`);
+            } else {
+              console.log(`[iotClient] ✅ Subscribed to topic: ${topic}`, granted);
+            }
+          });
+        }
+        onConnect?.();
+      });
+
+      client.on('message', (receivedTopic, payloadBuffer) => {
+        const text = payloadBuffer.toString();
+        console.log(`[iotClient] 📩 メッセージ受信 [${receivedTopic}]:`, text);
+        try {
+          onMessage?.(receivedTopic, JSON.parse(text));
+        } catch {
+          onMessage?.(receivedTopic, text);
+        }
+      });
+
+      client.on('close', () => {
+        console.warn('[iotClient] MQTT接続が切断されました (close)');
+        onDisconnect?.();
+        scheduleReconnect();
+      });
+
+      client.on('offline', () => {
+        console.warn('[iotClient] MQTT接続がオフラインになりました');
+      });
+
+      client.on('error', (err) => {
+        console.error('[iotClient] MQTT接続エラー:', err);
+        onError?.(err);
+      });
+
+    } catch (err) {
+      console.error('[iotClient] 初期接続エラー:', err);
+      onError?.(err);
+      scheduleReconnect();
     }
-  });
+  }
 
-  client.on('error', (err) => {
-    // eslint-disable-next-line no-console
-    console.error('[iotClient] MQTT接続エラー:', err);
-  });
+  function scheduleReconnect() {
+    if (isClosed) return;
+    if (client) {
+      client.removeAllListeners();
+      client.on('error', () => {}); // 破棄中のエラーを無視
+      client.end(true);
+      client = null;
+    }
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 4000);
+    }
+  }
 
-  return client;
+  // 初回接続を開始
+  await connect();
+
+  // クリーンアップ用の関数を返す（useDetectionPipelineのアンマウント時に呼ばれる）
+  return () => {
+    isClosed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (client) {
+      client.removeAllListeners();
+      client.on('error', () => {});
+      client.end(true);
+    }
+  };
 }
 
 // ===================================================================
@@ -206,9 +260,7 @@ export async function connectIotCore(topic, onMessage) {
 // が返す pushNotification(key, {title, message, level}) にそのまま渡せる形)
 // に変換するヘルパー。
 //
-// 【まだどこからも呼ばれていない】connectIotCore()と同様、実際にRole Aから
-// MQTTトピック名を受領してonMessageコールバックを配線する段階になったら、
-// その中でこの関数を呼び出す想定(上のconnectIotCoreの使い方コメント参照)。
+// 受信したメッセージをUIで表示する際に、useMonitoringAlerts.js 等から呼び出して使用する。
 //
 // 仕様書に定義の無い hazard_type / sensor_type / alert_type、または
 // 「危険行為」として通知する意味の薄いイベント(温度センサーの値など)は
