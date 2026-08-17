@@ -296,11 +296,13 @@ export default function HistoryPage() {
         ヒートマップで確認できます。色が濃い(赤みが強い)場所ほど、発生回数が多いエリアです。
       </p>
 
+      {/* 【重要】デモ用データモードでは、履歴APIの設定有無に関わらず実データへは
+          通信せず、常にこの端末で自由に追加・編集・削除できるサンプルデータを
+          表示する(historyApi.js参照。ハンバーガーメニュー「管理画面」→「危険行為
+          履歴データの編集」から編集できる)。 */}
       {!historyState.loading && historyState.source === 'mock' && (
         <p style={s.dataSourceNote}>
-          {historyState.error
-            ? `⚠ 履歴APIからの取得に失敗したため、サンプルデータを表示しています(${historyState.error})`
-            : '※ 現時点ではサンプルデータを表示しています(履歴APIの接続先が未設定です)。'}
+          ※ デモ用データモードのため、サンプルデータを表示しています。管理画面の「危険行為履歴データの編集」から自由に追加・編集・削除できます。
         </p>
       )}
       {!historyState.loading && historyState.source === 'api' && (

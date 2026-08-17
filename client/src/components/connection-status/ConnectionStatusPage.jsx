@@ -4,7 +4,7 @@ import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
 import { isCognitoConfigured, AWS_REGION } from '../../amplifyConfig';
 import { describeCognitoError } from '../../cognitoErrors';
-import { fetchIncidentsSortedDesc } from '../../historyApi';
+import { checkHistoryApiConnectivity } from '../../historyApi';
 import { getSignedIotWebSocketUrl } from '../../iotClient';
 import { withTimeout } from '../../withTimeout';
 
@@ -36,11 +36,14 @@ import { withTimeout } from '../../withTimeout';
 //                   自動実行にしていない理由: Cognitoの一時クレデンシャルが
 //                   必要な上、ネットワーク環境によっては接続確立(または
 //                   タイムアウト)までに数秒かかることがあるため。
-//   ・履歴API     : ページ表示時に自動でfetchIncidentsSortedDesc()を呼び、
-//                   実データ('api')かサンプルデータへのフォールバック('mock')
-//                   かを確認する(historyApi.js内で通信エラー時は自動的に
-//                   サンプルデータへフォールバックする仕様のため、通信自体が
-//                   失敗しても画面が壊れることは無い)。
+//   ・履歴API     : ページ表示時に自動でcheckHistoryApiConnectivity()を呼び、
+//                   デモ/本番のどちらのモードでも常に実際のAWS履歴APIへの疎通を
+//                   試みて、実データを取得できるか('api')・できないか('error')を
+//                   確認する(危険行為の履歴・見守りダッシュボード等の画面表示に
+//                   使うfetchIncidentsSortedDesc()は、デモ用データモードのときは
+//                   実データへ一切通信しないため、この診断目的には使えない。
+//                   historyApi.js参照)。通信自体が失敗しても、この診断表示が
+//                   壊れることは無い(エラーメッセージを表示するだけ)。
 //   ・S3/デプロイ  : ライブでの接続確認はできない(ブラウザからS3へ書き込み
 //                   確認する手段が無いため)。設定値の表示のみ。
 //   ・検出パイプライン: useDetectionPipeline()が返す状態(App.jsxから
@@ -111,31 +114,35 @@ export default function ConnectionStatusPage({
   // --- 履歴API(自動確認) ---
   const [historyStatus, setHistoryStatus] = useState({ state: 'checking', message: '確認中…' });
 
+  // 【重要】ここでは常にcheckHistoryApiConnectivity()(実データへの疎通を必ず
+  // 試みる診断専用関数)を呼ぶ。危険行為の履歴・見守りダッシュボード等の実際の
+  // 画面表示に使うfetchIncidentsSortedDesc()は、デモ用データモードのときは
+  // 実データへ一切通信しない(historyApi.js参照)ため、このページの目的
+  // (AWSと実際に通信できているかどうかの確認)には使えない。デモ用データ
+  // モードでも「AWS自体には実際に繋がっているか」をここでは確認できるように
+  // している(画面上の表示メッセージだけ、現在のモードに応じて出し分ける)。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setHistoryStatus({ state: 'checking', message: '確認中…' });
-      const { incidents, source, error } = await fetchIncidentsSortedDesc({ isProduction });
+      const { incidents, source, error } = await checkHistoryApiConnectivity();
       if (cancelled) return;
       if (source === 'api') {
         setHistoryStatus({ state: 'ok', message: `履歴APIから実データを取得できました(${incidents.length}件)。`, source });
-      } else if (source === 'error') {
-        // 本番環境モードでの取得失敗(サンプルデータへはフォールバックしていない)
+      } else if (error && error.includes('VITE_HISTORY_API_URL')) {
         setHistoryStatus({
-          state: 'error',
-          message: `本番環境モードのため、履歴APIの取得に失敗してもサンプルデータへは切り替えていません。取得できませんでした(${error})。`,
-          source,
-        });
-      } else if (error) {
-        setHistoryStatus({
-          state: 'error',
-          message: `履歴APIへの接続に失敗したため、サンプルデータを表示中です(${error})。`,
+          state: 'unconfigured',
+          message: isProduction
+            ? '履歴API(VITE_HISTORY_API_URL)が未設定のため、本番環境モードでは実データを取得できません。'
+            : '履歴API(VITE_HISTORY_API_URL)が未設定です。デモ用データモードでは、画面にはこの端末で編集可能なサンプルデータを表示します。',
           source,
         });
       } else {
         setHistoryStatus({
-          state: 'unconfigured',
-          message: 'VITE_HISTORY_API_URLが未設定のため、サンプルデータを表示中です。',
+          state: 'error',
+          message: isProduction
+            ? `本番環境モードのため、履歴APIの取得に失敗してもサンプルデータへは切り替えていません。取得できませんでした(${error})。`
+            : `履歴APIへの接続を試みましたが失敗しました(${error})。デモ用データモードでは、画面にはこの端末で編集可能なサンプルデータを表示します(実データへの接続自体は失敗しています)。`,
           source,
         });
       }
@@ -248,7 +255,11 @@ export default function ConnectionStatusPage({
           <p style={styles.cardDesc}>{historyStatus.message}</p>
           <dl style={styles.infoList}>
             <Info label="API URL" value={HISTORY_API_URL || '(未設定)'} theme={theme} />
-            <Info label="データソース" value={historyStatus.source === 'api' ? '実データ(API)' : 'サンプルデータ(モック)'} theme={theme} />
+            <Info
+              label="データソース"
+              value={historyStatus.source === 'api' ? '実データ(API)' : '取得できず(未接続/エラー)'}
+              theme={theme}
+            />
           </dl>
         </section>
 
