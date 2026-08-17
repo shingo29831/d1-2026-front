@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import socket from '../socket';
 import { connectIotCore } from '../iotClient';
+import { IOT_SUBSCRIBE_TOPIC } from '../config';
 
 // ===================================================================
 // YOLOの検出パイプライン（Webカメラ/動画 → フレーム送信 → pose-data受信）を
@@ -146,11 +147,17 @@ export function useDetectionPipeline() {
       try {
         // iotClient.js の connectIotCore を呼び出し、コールバックでイベントを受け取る
         disconnectFn = await connectIotCore(
+          IOT_SUBSCRIBE_TOPIC, // 第一引数にトピック名を正しく渡す
           (topic, message) => {
             if (!isMounted) return;
             try {
               const data = typeof message === 'string' ? JSON.parse(message) : message;
               setIotMessage({ topic, data, timestamp: Date.now() });
+              
+              // 【追加】受信したデータをアプリのステート(poseData)にも反映させ、
+              // 3DマッピングやポップアップUIが自動的に発火するようにする
+              setPoseData(data);
+              setLastPoseAt(Date.now());
             } catch (err) {
               console.warn('[IoT] メッセージのパースに失敗しました:', err);
             }
