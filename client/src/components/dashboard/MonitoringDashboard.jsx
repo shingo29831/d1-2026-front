@@ -9,6 +9,7 @@ import { isInsideZone, imageToFloor } from '../../poseGeometry';
 import { isPositionBlocked, resolveSafePosition } from '../../roomCollision';
 import { THRESHOLDS } from '../../config';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 import { getIncidentsSortedDesc } from '../../incidentHistory';
 import { fetchIncidentsSortedDesc } from '../../historyApi';
 
@@ -47,6 +48,7 @@ export default function MonitoringDashboard({
 }) {
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'pov'
   const { theme } = useTheme();
+  const { isProduction } = useOperationMode();
   const { footprint, zones, walls, furniture, roomShapeType, cameraMount, cameraYawDeg } = useRoomConfig();
 
   // --------------------------------------------------------------
@@ -58,17 +60,22 @@ export default function MonitoringDashboard({
   // IncidentHeatmap3D.jsx)と同じロジック(incidentHeatmap.js)を使う。
   // --------------------------------------------------------------
   const [showHeatmap, setShowHeatmap] = useState(false);
-  const [heatmapHistoryState, setHeatmapHistoryState] = useState(() => ({
-    incidents: getIncidentsSortedDesc(),
-    source: 'mock',
-  }));
+  // 【重要】本番環境モードでは、取得に失敗してもサンプルデータへフォールバック
+  // しない(historyApi.js参照)。ここは背景に重ねる補助的なヒートマップのため
+  // 専用のエラー表示までは出さないが、取得できなかった場合はincidents:[]の
+  // ままにして「実在しないホットスポット」が表示されないようにする。
+  const [heatmapHistoryState, setHeatmapHistoryState] = useState(() => (
+    isProduction
+      ? { incidents: [], source: 'error' }
+      : { incidents: getIncidentsSortedDesc(), source: 'mock' }
+  ));
   useEffect(() => {
     let cancelled = false;
-    fetchIncidentsSortedDesc().then((result) => {
+    fetchIncidentsSortedDesc({ isProduction }).then((result) => {
       if (!cancelled) setHeatmapHistoryState(result);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [isProduction]);
   const heatmapRoomCenter = useMemo(() => footprintCenter(footprint), [footprint]);
   // historyApi.js経由の実データは、位置(x, z)が不明な項目がx: null, z: nullで
   // 返ってくるため、HistoryPage.jsxと同じ方針で部屋の中心に概算配置しておく

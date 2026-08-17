@@ -11,6 +11,7 @@ import FurnitureSetupPage from './components/furniture-zone-setup/FurnitureSetup
 import ZoneSetupPage from './components/furniture-zone-setup/ZoneSetupPage';
 import DoorSensorSetupPage from './components/door-sensor-setup/DoorSensorSetupPage';
 import HistoryPage from './components/history/HistoryPage';
+import IncidentDataEditorPage from './components/history/IncidentDataEditorPage';
 import ConnectionStatusPage from './components/connection-status/ConnectionStatusPage';
 import LoginPage from './components/auth/LoginPage';
 import VersionBadge from './components/layout/VersionBadge';
@@ -269,6 +270,8 @@ function AppShell({ userEmail, authMode, onLogout }) {
           {page === 'doorSensorSetup' && <DoorSensorSetupPage />}
 
           {page === 'history' && <HistoryPage />}
+
+          {page === 'historyDataEdit' && <IncidentDataEditorPage />}
 
           {page === 'connectionStatus' && (
             <ConnectionStatusPage

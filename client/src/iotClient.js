@@ -256,7 +256,8 @@ export async function connectIotCore(topic, onMessage, onConnect, onDisconnect, 
 // ===================================================================
 // AWS IoT Coreから受信するJSON(https://d1-docs.pages.dev/ で確認した
 // 「システム共通JSONスキーマ」。historyApi.js が履歴APIの解釈に使っている
-// ものと同じ3パターン)を、見守りモニターの危険通知(useMonitoringAlerts.js
+// ものと同じ4パターン: ai_hazard/sensor_alert/complex_alert/risk_suggestion)を、
+// 見守りモニターの危険通知(useMonitoringAlerts.js
 // が返す pushNotification(key, {title, message, level}) にそのまま渡せる形)
 // に変換するヘルパー。
 //
@@ -301,6 +302,18 @@ export function describeIotEvent(raw) {
       title: '夜間徘徊の疑い',
       message: `夜間徘徊の疑いを検知しました${luxNote}。`,
       level: 'danger',
+    };
+  }
+
+  if (raw.event_type === 'risk_suggestion') {
+    // useMonitoringAlerts.js側のライブ判定ロジックと文言・判定基準を揃えている
+    // (このヘルパー自体はUI未配線だが、将来配線した際に挙動が食い違わないようにするため)。
+    const reasonText = details.reason === 'unusual_access_time' ? '普段行かない場所へのアクセス' : details.reason;
+    return {
+      key: 'iot_risk_suggestion',
+      title: '潜在的リスクのサジェスト',
+      message: `AIによるリスクサジェスト: ${reasonText}`,
+      level: details.risk_level === 'high' ? 'danger' : 'warning',
     };
   }
 
