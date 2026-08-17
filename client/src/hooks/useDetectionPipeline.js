@@ -147,14 +147,14 @@ export function useDetectionPipeline() {
       try {
         // iotClient.js の connectIotCore を呼び出し、コールバックでイベントを受け取る
         disconnectFn = await connectIotCore(
-          IOT_SUBSCRIBE_TOPIC, // 第一引数にトピック名を正しく渡す
+          IOT_SUBSCRIBE_TOPIC,
           (topic, message) => {
             if (!isMounted) return;
             try {
               const data = typeof message === 'string' ? JSON.parse(message) : message;
               setIotMessage({ topic, data, timestamp: Date.now() });
               
-              // 【追加】受信したデータをアプリのステート(poseData)にも反映させ、
+              // 受信したデータをアプリのステート(poseData)にも反映させ、
               // 3DマッピングやポップアップUIが自動的に発火するようにする
               setPoseData(data);
               setLastPoseAt(Date.now());
