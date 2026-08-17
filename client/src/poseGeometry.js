@@ -87,7 +87,7 @@ export function analyzePerson(keypoints, roomConfig) {
 // より正確な位置が必要な場合は、深度カメラや複数カメラでの三角測量への
 // 置き換えを推奨します（TODO）。
 // -------------------------------------------------------------------
-function imageToFloor(imgX, imgY, roomConfig) {
+export function imageToFloor(imgX, imgY, roomConfig) {
   const footprint = roomConfig?.footprint || DEFAULT_FOOTPRINT;
   const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
