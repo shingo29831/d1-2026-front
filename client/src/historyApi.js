@@ -99,6 +99,23 @@ function normalizeComplexAlertDetails(details) {
   };
 }
 
+function normalizeRiskSuggestionDetails(details) {
+  if (!details || !details.suggested_area) return null;
+  const reasonText = details.reason === 'unusual_access_time' ? '普段行かない場所へのアクセス' : details.reason;
+  return {
+    type: 'risk_suggestion',
+    category: 'risk_suggestion',
+    severity: details.risk_level === 'high' ? 'danger' : 'warning',
+    label: `潜在的リスク: ${reasonText}`,
+    rawX: details.suggested_area.x,
+    rawY: details.suggested_area.y,
+    radius: details.suggested_area.radius,
+    x: null,
+    z: null,
+    approx: true,
+  };
+}
+
 // APIレスポンスの1件(仕様書の共通JSONスキーマ)を、このアプリの内部形式
 // { id, type, category, severity, label, x, z, time, approx, deviceId, roomId } に変換する。
 // 対応していないevent_type/hazard_type等の場合はnullを返し、その1件だけ無視する。
@@ -110,6 +127,7 @@ function normalizeIncident(raw, index) {
   if (raw.event_type === 'ai_hazard') base = normalizeAiHazardDetails(raw.details);
   else if (raw.event_type === 'sensor_alert') base = normalizeSensorAlertDetails(raw.details);
   else if (raw.event_type === 'complex_alert') base = normalizeComplexAlertDetails(raw.details);
+  else if (raw.event_type === 'risk_suggestion') base = normalizeRiskSuggestionDetails(raw.details);
 
   if (!base) return null;
 
