@@ -18,7 +18,7 @@ function nextId() {
  *   ・危険エリアへの侵入
  * を検出し、動画のUIのような通知リストを生成する。
  */
-export function useMonitoringAlerts(poseData, lastPoseAt, connected) {
+export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage) {
   const { footprint, cameraMount, cameraYawDeg, zones, doorSensors } = useRoomConfig();
   const [notifications, setNotifications] = useState([]);
   const [statusText, setStatusText] = useState('待機中');
@@ -84,6 +84,63 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected) {
   }, []);
 
   const clearAll = useCallback(() => setNotifications([]), []);
+
+  // AWS IoT Core からのリアルタイム通知 (MQTT) を監視し、
+  // システム共通JSONスキーマに従って通知パネルへポップアップさせる。
+  useEffect(() => {
+    if (!iotMessage || !iotMessage.data) return;
+
+    const { event_type, details, timestamp } = iotMessage.data;
+    // 重複通知を防ぐため、メッセージのタイムスタンプをキーに含める
+    const msgKey = `${event_type}_${timestamp}`;
+
+    if (event_type === 'ai_hazard') {
+      const hazardType = details.hazard_type;
+      if (hazardType === 'fall') {
+        pushNotification(`iot_fall_${msgKey}`, {
+          title: '転倒検知 (クラウドAI)',
+          message: '転倒を検知しました。至急ご確認ください。',
+          level: 'danger',
+        });
+      } else if (hazardType === 'prone') {
+        pushNotification(`iot_prone_${msgKey}`, {
+          title: 'うつ伏せ寝検知 (クラウドAI)',
+          message: 'うつ伏せ寝を検知しました。呼吸状態にご注意ください。',
+          level: 'danger',
+        });
+      } else if (hazardType === 'intrusion') {
+        pushNotification(`iot_intrusion_${msgKey}`, {
+          title: '危険エリア侵入 (クラウドAI)',
+          message: '危険エリアへの侵入を検知しました。',
+          level: 'danger',
+        });
+      }
+    } else if (event_type === 'sensor_alert') {
+      if (details.sensor_type === 'door') {
+        const statusText = details.status === 'open' ? '開きました' : '閉まりました';
+        pushNotification(`iot_door_${details.status}_${msgKey}`, {
+          title: `ドアセンサーが${statusText}`,
+          message: `ドアが${statusText} (バッテリー: ${details.battery_level}%)`,
+          level: 'warning',
+        });
+      }
+    } else if (event_type === 'complex_alert') {
+      if (details.alert_type === 'night_wandering') {
+        pushNotification(`iot_night_wandering_${msgKey}`, {
+          title: '夜間徘徊の疑い',
+          message: `夜間徘徊の疑いを検知しました (きっかけ: ${details.trigger_device}, 照度: ${details.lux}lux)`,
+          level: 'danger',
+        });
+      }
+    } else if (event_type === 'risk_suggestion') {
+      const reasonText = details.reason === 'unusual_access_time' ? '普段行かない場所へのアクセス' : details.reason;
+      pushNotification(`iot_risk_${msgKey}`, {
+        title: '潜在的リスクのサジェスト',
+        message: `AIによるリスクサジェスト: ${reasonText}`,
+        level: details.risk_level === 'high' ? 'danger' : 'warning',
+      });
+    }
+  }, [iotMessage, pushNotification]);
 
   // 開閉センサーの状態が変わるたびに通知を発生させる
   // (「開閉センサーの設定」タブの状態切り替えボタン、または将来の実センサー
