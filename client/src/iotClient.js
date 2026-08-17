@@ -166,8 +166,11 @@ export async function getSignedIotWebSocketUrl() {
 //   ...
 //   client.end(); // クリーンアップ時
 export async function connectIotCore(topic, onMessage) {
+  const mqttModule = await import('mqtt');
+  // Vite環境でのESM/CommonJSの差異を吸収し、ライブラリ本体を正しく取得する
+  const mqttClient = mqttModule.default || mqttModule;
   const url = await getSignedIotWebSocketUrl();
-  const client = mqtt.connect(url, {
+  const client = mqttClient.connect(url, {
     protocolVersion: 4,
     clean: true,
     reconnectPeriod: 4000,
