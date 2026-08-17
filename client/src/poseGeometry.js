@@ -6,7 +6,7 @@ import {
   CAMERA_PITCH_DEG as DEFAULT_PITCH_DEG,
   CAMERA_FOV_DEG as DEFAULT_FOV_DEG,
 } from './config';
-import { footprintBounds } from './roomShapes';
+import { footprintBounds, pointInPolygon } from './roomShapes';
 
 // ===================================================================
 // YOLOv8-Poseの2Dキーポイント(画像座標: 640x480, カメラ映像基準)から、
@@ -191,22 +191,48 @@ export function imageToFloor(imgX, imgY, roomConfig) {
   const roomDiagonalM = Math.hypot(roomBounds.width, roomBounds.depth);
   const MAX_RAY_DISTANCE_M = Math.max(roomDiagonalM * 1.5, 5);
 
+  // 【不具合修正】上記の投影距離の上限は「部屋の外接矩形(バウンディングボックス)」
+  // の対角線をもとに計算しているため、L字型など長方形でない部屋の場合、この上限
+  // いっぱいまで投影すると壁の外(部屋の凹んだ部分や外接矩形の外側の何もない
+  // 空間)に人物が表示されてしまうことがあった。ダッシュボードの画面外にぽつんと
+  // 円が浮いて見える不具合や、「AIリスクサジェスト」機能がこの投影座標を再利用
+  // する際に壁の外の座標を「普段行かない場所」として誤検知してしまう不具合の
+  // 原因になっていた。実際の部屋の多角形(footprint)に対してpointInPolygonで
+  // 判定し、壁の外に出てしまう場合は、カメラ位置からそのレイ方向へ二分探索で
+  // 「まだ部屋の中にいる最大の距離」を求め、その距離までのみ投影することで、
+  // 投影位置が必ず実際の壁の内側(またはすぐ手前)に収まるようにした。
+  const clampRayToFootprint = (distance) => {
+    const targetX = cameraMount.x + dir.x * distance;
+    const targetZ = cameraMount.z + dir.z * distance;
+    if (pointInPolygon(targetX, targetZ, footprint)) {
+      return { x: targetX, z: targetZ };
+    }
+    let lo = 0;
+    let hi = distance;
+    for (let i = 0; i < 24; i++) {
+      const mid = (lo + hi) / 2;
+      const midX = cameraMount.x + dir.x * mid;
+      const midZ = cameraMount.z + dir.z * mid;
+      if (pointInPolygon(midX, midZ, footprint)) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    return { x: cameraMount.x + dir.x * lo, z: cameraMount.z + dir.z * lo };
+  };
+
   if (dir.y >= -1e-4) {
     // レイがほぼ水平または上を向いている（床とほぼ交差しない＝空や遠くの壁を
-    // 見ている）場合は、割り算が発散するため、上限距離の位置を返す。
-    return {
-      x: cameraMount.x + dir.x * MAX_RAY_DISTANCE_M,
-      z: cameraMount.z + dir.z * MAX_RAY_DISTANCE_M,
-    };
+    // 見ている）場合は、割り算が発散するため、上限距離の位置を返す
+    // (実際の壁の内側に収まるようクランプ済み)。
+    return clampRayToFootprint(MAX_RAY_DISTANCE_M);
   }
 
   const t = Math.min(-cameraMount.y / dir.y, MAX_RAY_DISTANCE_M);
 
-  // 交差点（床の上の座標）
-  return {
-    x: cameraMount.x + dir.x * t,
-    z: cameraMount.z + dir.z * t,
-  };
+  // 交差点（床の上の座標。実際の壁の内側に収まるようクランプ済み)
+  return clampRayToFootprint(t);
 }
 
 /** 2つのフロア座標間の距離(メートル) */

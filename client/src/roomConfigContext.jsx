@@ -122,6 +122,48 @@ export function RoomConfigProvider({ children }) {
     return () => { cancelled = true; };
   }, []);
 
+  // 【不具合修正】「カメラ位置の設定」タブで保存しても、別のブラウザタブ/ウィンドウで
+  // 開いたままの「見守りダッシュボード」には反映されない、というご指摘への対応。
+  // このコンテキストの状態は起動時(初回マウント時)に一度だけlocalStorageから
+  // 読み込んでReact stateに入れており、以降はReact state自体を正としてUIを
+  // 描画している(アプリ内のページ切り替えはstate切り替えのみで、RoomConfigProvider
+  // 自体は再マウントされないため、同じタブ内でのページ移動では常に最新の状態が
+  // 共有される)。ところが、見守りダッシュボードだけを別タブ/別ウィンドウで開いたまま
+  // 別のタブで設定を変更した場合、設定を変更した側のタブのlocalStorageは正しく
+  // 更新されるが、ダッシュボード側のタブは自分自身がその場で書き込んだわけではない
+  // ため、ページを再読み込みしない限りReact stateに変更が反映されない
+  // (=ダッシュボードだけ古い設定のまま、というように見える)という不具合があった。
+  // ブラウザ標準のstorageイベント(自分以外のタブ/ウィンドウがlocalStorageを
+  // 変更したときに発火する)を購読し、変更があった項目をこのタブのReact stateにも
+  // 反映することで、タブを切り替えたりダッシュボードを開いたままにしていても、
+  // 他のタブでの保存内容がリアルタイムに反映されるようにした。
+  useEffect(() => {
+    const handleStorage = (e) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      let next;
+      try {
+        next = JSON.parse(e.newValue);
+      } catch {
+        return;
+      }
+      if (!next || typeof next !== 'object') return;
+      if (next.shape) setShapeState(next.shape);
+      if (next.height != null) setHeightState(next.height);
+      if (next.cameraMount) setCameraMountState(next.cameraMount);
+      if (next.cameraYawDeg != null) setCameraYawDegState(next.cameraYawDeg);
+      if (next.cameraPitchDeg != null) setCameraPitchDegState(next.cameraPitchDeg);
+      if (next.cameraFovDeg != null) setCameraFovDegState(next.cameraFovDeg);
+      if (next.cameraRangeM != null) setCameraRangeMState(next.cameraRangeM);
+      if (next.cameraMode) setCameraModeState(next.cameraMode);
+      if (Array.isArray(next.furniture)) setFurnitureState(next.furniture);
+      if (Array.isArray(next.zones)) setZonesState(next.zones);
+      if (Array.isArray(next.doorSensors)) setDoorSensorsState(next.doorSensors);
+      if (Array.isArray(next.walls)) setWallsState(next.walls);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
   // 【不具合修正】以前はbuildPersistPayload()が組み立てた「その時点のReact state
   // 全体のスナップショット」をそのままここでlocalStorageに上書き保存していた。
   // ところが「カメラ位置の設定」タブの保存ボタン(handleSave)のように、1つの
