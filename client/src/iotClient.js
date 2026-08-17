@@ -166,7 +166,6 @@ export async function getSignedIotWebSocketUrl() {
 //   ...
 //   client.end(); // クリーンアップ時
 export async function connectIotCore(topic, onMessage) {
-  const mqtt = await import('mqtt');
   const url = await getSignedIotWebSocketUrl();
   const client = mqtt.connect(url, {
     protocolVersion: 4,
