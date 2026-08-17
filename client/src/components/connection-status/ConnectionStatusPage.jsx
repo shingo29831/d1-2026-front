@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 import { isCognitoConfigured, AWS_REGION } from '../../amplifyConfig';
 import { describeCognitoError } from '../../cognitoErrors';
 import { fetchIncidentsSortedDesc } from '../../historyApi';
@@ -54,6 +55,7 @@ export default function ConnectionStatusPage({
   lastPoseAt,
 }) {
   const { theme } = useTheme();
+  const { isProduction } = useOperationMode();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const HISTORY_API_URL = import.meta.env.VITE_HISTORY_API_URL || '';
@@ -113,10 +115,17 @@ export default function ConnectionStatusPage({
     let cancelled = false;
     (async () => {
       setHistoryStatus({ state: 'checking', message: '確認中…' });
-      const { incidents, source, error } = await fetchIncidentsSortedDesc();
+      const { incidents, source, error } = await fetchIncidentsSortedDesc({ isProduction });
       if (cancelled) return;
       if (source === 'api') {
         setHistoryStatus({ state: 'ok', message: `履歴APIから実データを取得できました(${incidents.length}件)。`, source });
+      } else if (source === 'error') {
+        // 本番環境モードでの取得失敗(サンプルデータへはフォールバックしていない)
+        setHistoryStatus({
+          state: 'error',
+          message: `本番環境モードのため、履歴APIの取得に失敗してもサンプルデータへは切り替えていません。取得できませんでした(${error})。`,
+          source,
+        });
       } else if (error) {
         setHistoryStatus({
           state: 'error',
@@ -132,7 +141,7 @@ export default function ConnectionStatusPage({
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isProduction]);
 
   // --- IoT Core(手動テスト) ---
   const [iotStatus, setIotStatus] = useState({ state: 'idle', message: 'まだ確認していません。' });
@@ -261,32 +270,63 @@ export default function ConnectionStatusPage({
         </section>
 
         {/* 検出パイプライン(説明文が長いため3列ぶん=全幅を使う) */}
+        {/* 【重要】デモ/本番モード切り替え機能の追加に伴い、この欄の説明文・表示項目も
+            モードに応じて出し分けている。本番環境ではこのブラウザのWebカメラ・Socket.IO
+            送信デモは無効化され、代わりに②のAWS IoT Core接続のみが実際のデータ経路になる
+            ため、旧来のデモ向け文言のまま出し続けると「Webカメラが未接続」等と誤解を招く
+            (実際には意図的に無効化されているだけで異常ではない)ため、mode-awareにした。 */}
         <section style={{ ...styles.card, gridColumn: '1 / -1' }}>
           <div style={styles.cardHeadRow}>
-            <h3 style={styles.cardTitle}>⑤ 検出パイプライン(Webカメラ・見守りサーバー)</h3>
+            <h3 style={styles.cardTitle}>
+              ⑤ 検出パイプライン({isProduction ? 'AWS IoT Core経由' : 'Webカメラ・見守りサーバー'})
+            </h3>
             <StatusBadge state={connected ? 'ok' : 'error'} theme={theme} label={connected ? '接続中' : '未接続'} />
           </div>
-          <p style={styles.cardDesc}>
-            <strong>【重要】</strong>このアプリ(フロントエンド)は、実際のCisco Meraki MVカメラには直接
-            接続していません。カメラ映像のAI解析はRole A(クラウド/AI側)の担当範囲であり、フロントエンドは
-            解析後の結果(IoT Core・履歴API経由)を受け取る想定です。現時点ではその配線が未完了のため、
-            代わりにこのブラウザ自身のWebカメラを見守りサーバー(Socket.IO)へ送信し、動作確認用の
-            検出デモとして使っています。以下はその「Webカメラ ⇔ 見守りサーバー」の接続状況です。
-          </p>
-          <dl style={styles.infoList}>
-            <Info label="見守りサーバー(Socket.IO)" value={connected ? '接続中' : '未接続'} theme={theme} />
-            <Info label="キャプチャモード" value={shouldCapture ? '有効(このタブからカメラ映像を送信)' : '閲覧専用(?view=1等でアクセス中)'} theme={theme} />
-            <Info label="Webカメラ" value={cameraError ? `エラー: ${cameraError}` : (shouldCapture ? '起動中/起動試行済み' : '(閲覧専用のため未起動)')} theme={theme} />
-            <Info
-              label="最終検出データ受信"
-              value={lastPoseAt ? `${Math.round((Date.now() - lastPoseAt) / 1000)}秒前` : 'まだ受信していません'}
-              theme={theme}
-            />
-          </dl>
-          {shouldCapture && (
-            <button style={styles.testBtn} onClick={requestWebcam}>
-              Webカメラを再試行
-            </button>
+          {isProduction ? (
+            <>
+              <p style={styles.cardDesc}>
+                現在は<strong>本番環境モード</strong>です。本番環境ではこのブラウザ自身のWebカメラを
+                見守りサーバー(Socket.IO)へ送信する動作確認用デモは無効化されており、実際のCisco Meraki
+                MVカメラ映像のAI解析結果(Role A担当)を、上記②のAWS IoT Core(MQTT over WebSocket)
+                経由でのみ受信します。ここでの接続状況は②のIoT Core接続状況と連動しています。
+              </p>
+              <dl style={styles.infoList}>
+                <Info label="動作モード" value="本番環境(Webカメラ・Socket.IO送信は無効)" theme={theme} />
+                <Info label="データ経路" value="AWS IoT Core (MQTT over WebSocket)" theme={theme} />
+                <Info
+                  label="最終検出データ受信"
+                  value={lastPoseAt ? `${Math.round((Date.now() - lastPoseAt) / 1000)}秒前` : 'まだ受信していません'}
+                  theme={theme}
+                />
+              </dl>
+            </>
+          ) : (
+            <>
+              <p style={styles.cardDesc}>
+                <strong>【重要】</strong>このアプリ(フロントエンド)は、実際のCisco Meraki MVカメラには直接
+                接続していません。カメラ映像のAI解析はRole A(クラウド/AI側)の担当範囲であり、フロントエンドは
+                解析後の結果(IoT Core・履歴API経由)を受け取る想定です。現時点ではその配線が未完了のため、
+                代わりにこのブラウザ自身のWebカメラを見守りサーバー(Socket.IO)へ送信し、動作確認用の
+                検出デモとして使っています。以下はその「Webカメラ ⇔ 見守りサーバー」の接続状況です(デモ用
+                データモード。ハンバーガーメニューから本番環境モードに切り替えると、上記のIoT Core経由の
+                表示に変わります)。
+              </p>
+              <dl style={styles.infoList}>
+                <Info label="見守りサーバー(Socket.IO)" value={connected ? '接続中' : '未接続'} theme={theme} />
+                <Info label="キャプチャモード" value={shouldCapture ? '有効(このタブからカメラ映像を送信)' : '閲覧専用(?view=1等でアクセス中)'} theme={theme} />
+                <Info label="Webカメラ" value={cameraError ? `エラー: ${cameraError}` : (shouldCapture ? '起動中/起動試行済み' : '(閲覧専用のため未起動)')} theme={theme} />
+                <Info
+                  label="最終検出データ受信"
+                  value={lastPoseAt ? `${Math.round((Date.now() - lastPoseAt) / 1000)}秒前` : 'まだ受信していません'}
+                  theme={theme}
+                />
+              </dl>
+              {shouldCapture && (
+                <button style={styles.testBtn} onClick={requestWebcam}>
+                  Webカメラを再試行
+                </button>
+              )}
+            </>
           )}
         </section>
       </div>

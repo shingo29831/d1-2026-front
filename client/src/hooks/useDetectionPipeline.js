@@ -2,16 +2,32 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import socket from '../socket';
 import { connectIotCore } from '../iotClient';
 import { IOT_SUBSCRIBE_TOPIC } from '../config';
+import { useOperationMode } from '../operationModeContext';
 
 // ===================================================================
 // YOLOの検出パイプライン（Webカメラ/動画 → フレーム送信 → pose-data受信）を
 // アプリ全体で1つだけ動かすためのフック。
 //
+// 【デモ用データ/本番環境の切り替え(operationModeContext.jsx)との対応】
+// このフックは、ハンバーガーメニューの「デモ用データ/本番環境」トグルの
+// 状態(useOperationMode())に応じて、データの取得経路を丸ごと切り替える。
+//   ・デモ(demo): 以前からの実装のまま。この端末のWebカメラ映像を100msごとに
+//     キャプチャしてSocket.IO経由でサーバーへ送信し(video-frame)、サーバー側の
+//     YOLO推論結果をSocket.IOのpose-dataイベントで受信して即座に3D表示する。
+//   ・本番(production): 仕様書(Role A / Role C)通り、カメラ映像の取得と
+//     AI推論はエッジ(EC2)側の役割のため、Webカメラの起動・フレーム送信は
+//     一切行わない。Socket.IOへの接続も行わず(socket.disconnect())、
+//     AWS IoT CoreからMQTT over WebSocketで受信した離散イベント(iotMessage)
+//     のみを扱う「閲覧専用」になる。仕様書のJSONスキーマ(ai_hazard/
+//     sensor_alert/complex_alert/risk_suggestion)には継続的な姿勢(pose)
+//     ストリームは存在しないため、本番ではposeData(連続的な人物追跡用の
+//     状態)は常にnullのままになる(=デモ用データの「歩き続ける3Dアバター」は
+//     デモ専用の表現であり、本番では表示されない。本番での危険通知・人物
+//     マーカー表示はuseMonitoringAlerts.js側でiotMessageから直接組み立てる)。
+//
 // 【Role C仕様書との対応】pose-data受信部分が仕様書Step 3「MQTT over
 // WebSocketの受信」・Step 4「リアルタイムアラートの3Dマッピング」の入力元に
-// 相当する(socket.jsの解説・ROLE_C_SPEC_ALIGNMENT.mdも参照)。将来的に
-// IoT Core経由のMQTT受信へ置き換える際は、下記の`socket.on('pose-data', ...)`
-// をMQTTトピックのメッセージハンドラに差し替える想定。
+// 相当する(socket.jsの解説・ROLE_C_SPEC_ALIGNMENT.mdも参照)。
 //
 // 以前はApp.jsx内に直接書かれていたロジックをそのまま抽出したもの。
 // どの画面(見守りダッシュボード/YOLO動作確認/Polycam動作確認)を見ていても
@@ -64,7 +80,13 @@ function describeCameraError(err) {
 }
 
 export function useDetectionPipeline() {
-  const [shouldCapture] = useState(resolveShouldCapture);
+  const { isProduction } = useOperationMode();
+  const [shouldCaptureByUrl] = useState(resolveShouldCapture);
+  // 本番環境モードでは、URLパラメータ(?capture=1)や接続端末に関わらず、必ず
+  // 「閲覧専用」(Webカメラ起動・フレーム送信を一切行わない)にする。仕様書
+  // (Role A/Role C)通り、カメラ映像の取得・AI推論はエッジ(EC2)側の役割であり、
+  // フロントエンドはAWS IoT CoreからのMQTT受信のみを行う画面のため。
+  const shouldCapture = isProduction ? false : shouldCaptureByUrl;
   const videoRef = useRef(null);
   const fileInputRef = useRef(null);
 
@@ -72,13 +94,30 @@ export function useDetectionPipeline() {
   const [videoSrc, setVideoSrc] = useState(null);
   const [cameraError, setCameraError] = useState(null);
 
-  const [connected, setConnected] = useState(socket.connected);
+  const [socketConnected, setSocketConnected] = useState(socket.connected);
   const [poseData, setPoseData] = useState(null);
   const [lastPoseAt, setLastPoseAt] = useState(null);
 
   // AWS IoT Core (本番環境) の接続状態と受信メッセージ
   const [iotConnected, setIotConnected] = useState(false);
   const [iotMessage, setIotMessage] = useState(null);
+
+  // 表示・判定に使う実際の「接続中」状態は、モードに応じてSocket.IO/IoT Coreの
+  // どちらか一方の接続状態を採用する(以前はSocket.IOの接続状態だけを見ていたため、
+  // 本番環境でIoT Coreに接続できていてもヘッダーが「サーバー未接続」のままに
+  // なってしまっていた)。
+  const connected = isProduction ? iotConnected : socketConnected;
+
+  // 本番環境へ切り替えた瞬間、デモ用データの継続的なpose-data(仕様書のJSON
+  // スキーマには存在しない、姿勢の連続ストリーム)は古い値が残ったままに
+  // なってしまうため、明示的にクリアしておく(=歩き続ける3Dアバターがデモの
+  // 名残として本番環境に居座って表示され続けることを防ぐ)。
+  useEffect(() => {
+    if (isProduction) {
+      setPoseData(null);
+      setLastPoseAt(null);
+    }
+  }, [isProduction]);
 
   // Webカメラを(再)起動する。
   // 「Webカメラを使用」ボタンはこの関数を直接呼び出すようにしており、既にwebcamモードで
@@ -133,12 +172,13 @@ export function useDetectionPipeline() {
     }
   }, [inputMode, videoSrc, shouldCapture]);
 
-  // AWS IoT Core (本番環境) への接続とMQTTメッセージ受信
-  // 環境変数 VITE_IOT_ENDPOINT が設定されている場合のみ自動的に接続を試みます。
-  // (ローカルのSocket.IO通信と並行して動作し、両方のデータを受信できます)
+  // AWS IoT Core (本番環境) への接続とMQTTメッセージ受信。
+  // 環境変数 VITE_IOT_ENDPOINT が設定されており、かつ本番環境モードのときだけ
+  // 接続する(デモ用データモードでは、たとえ環境変数が設定されていても接続
+  // しない。デモ/本番でデータ経路を完全に分離するため)。
   useEffect(() => {
     const endpoint = import.meta.env.VITE_IOT_ENDPOINT;
-    if (!endpoint) return undefined;
+    if (!endpoint || !isProduction) return undefined;
 
     let isMounted = true;
     let disconnectFn = null;
@@ -150,15 +190,16 @@ export function useDetectionPipeline() {
           IOT_SUBSCRIBE_TOPIC,
           (topic, message) => {
             if (!isMounted) return;
-            console.log('[useDetectionPipeline] アプリ層でデータを受信・反映します:', topic, message);
+            console.log('[useDetectionPipeline] IoT Coreからメッセージを受信しました:', topic, message);
             try {
               const data = typeof message === 'string' ? JSON.parse(message) : message;
+              // 【重要】ここでposeData(継続的な姿勢ストリーム用のstate)は更新しない。
+              // IoT Coreから届くのはai_hazard/sensor_alert/complex_alert/risk_suggestionの
+              // いずれかの離散イベントであり、poseDataが期待する
+              // { keypoints: [...] }形式の連続的な姿勢データではないため。
+              // 通知・危険マーカーの表示は、このiotMessageをuseMonitoringAlerts.js側で
+              // 解釈して行う。
               setIotMessage({ topic, data, timestamp: Date.now() });
-              
-              // 受信したデータをアプリのステート(poseData)にも反映させ、
-              // 3DマッピングやポップアップUIが自動的に発火するようにする
-              setPoseData(data);
-              setLastPoseAt(Date.now());
             } catch (err) {
               console.warn('[IoT] メッセージのパースに失敗しました:', err);
             }
@@ -179,13 +220,28 @@ export function useDetectionPipeline() {
       if (typeof disconnectFn === 'function') {
         disconnectFn();
       }
+      setIotConnected(false);
     };
-  }, []);
+  }, [isProduction]);
 
-  // socket.io: 接続状態 & pose-data受信
+  // socket.io: 接続状態 & pose-data受信(デモ用データモードのみ)。
+  // 【本番環境での完全な切り離し】本番環境モードでは、pose-dataイベントの
+  // リスナーを登録しないだけでなく、実際のSocket.IO接続そのものも切断する
+  // (socket.jsに書かれている通り、この接続はRole C仕様書のMQTT受信を
+  // 簡易的にモックしているだけの実装のため、本番では通信自体を発生させない)。
+  // デモ用データモードに戻ったときは、本番環境にいる間に切断されている
+  // 可能性があるため、明示的に再接続する。
   useEffect(() => {
-    const handleConnect = () => setConnected(true);
-    const handleDisconnect = () => setConnected(false);
+    if (isProduction) {
+      if (socket.connected) socket.disconnect();
+      setSocketConnected(false);
+      return undefined;
+    }
+
+    if (!socket.connected) socket.connect();
+
+    const handleConnect = () => setSocketConnected(true);
+    const handleDisconnect = () => setSocketConnected(false);
     const handlePoseData = (data) => {
       setPoseData(data);
       setLastPoseAt(Date.now());
@@ -200,7 +256,7 @@ export function useDetectionPipeline() {
       socket.off('disconnect', handleDisconnect);
       socket.off('pose-data', handlePoseData);
     };
-  }, []);
+  }, [isProduction]);
 
   // 100msごとに映像フレームをキャプチャしてサーバーへ送信(閲覧専用モードでは送信しない)
   useEffect(() => {

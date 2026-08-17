@@ -157,12 +157,32 @@ function extractList(data) {
   return null;
 }
 
-// 履歴データを取得する。戻り値: { incidents, source: 'api'|'mock', error: string|null }
+// 履歴データを取得する。戻り値: { incidents, source: 'api'|'mock'|'error', error: string|null }
 // incidents内の各項目は、床座標(x, z)が不明なもの(現状の"ai_hazard"等すべて)は
 // x: null, z: null, approx: true になっている。実際の間取りに配置する処理は
 // HistoryPage.jsx側(部屋の中心へフォールバック)に委ねる。
-export async function fetchIncidentsSortedDesc() {
+//
+// 【重要・本番環境モードでの挙動】opts.isProductionがtrueのとき(ハンバーガー
+// メニューの「本番環境」モード)は、取得に失敗しても`incidentHistory.js`の
+// サンプルデータへ自動フォールバックしない。以前はデモ用データモードと同じ
+// ロジックを共有しており、本番環境で履歴APIへの疎通が切れていても画面には
+// 「もっともらしい」サンプルデータがそのまま表示され続け、実際にはデータを
+// 取得できていないことに気づきにくいという問題があった(お客様からのご指摘)。
+// 本番環境では、取得できなかった場合は source: 'error' ・ incidents: [] を返し、
+// 呼び出し側(HistoryPage.jsx等)で「取得できませんでした」と明確に表示する。
+// デモ用データモードでは、これまで通りサンプルデータへのフォールバックを維持する
+// (デモとして常に何かしらの表示ができることを優先するため)。
+export async function fetchIncidentsSortedDesc(opts = {}) {
+  const isProduction = !!opts.isProduction;
+
   if (!HISTORY_API_URL) {
+    if (isProduction) {
+      return {
+        incidents: [],
+        source: 'error',
+        error: '本番環境モードですが、履歴API(VITE_HISTORY_API_URLの環境変数)が設定されていません。',
+      };
+    }
     return { incidents: getMockIncidentsSortedDesc(), source: 'mock', error: null };
   }
 
@@ -204,15 +224,25 @@ export async function fetchIncidentsSortedDesc() {
     }
     return { incidents, source: 'api', error: null };
   } catch (err) {
+    const isTimeout = err && err.name === 'AbortError';
+    const message = isTimeout
+      ? 'APIの応答がありませんでした(10秒でタイムアウトしました)。ネットワーク環境(社内ネットワーク/VPN等の制限)をご確認ください。'
+      : (err && err.message ? err.message : String(err));
+
+    if (isProduction) {
+      // 【重要】本番環境モードではサンプルデータへフォールバックしない
+      // (このファイル冒頭のコメント参照)。
+      // eslint-disable-next-line no-console
+      console.warn('[historyApi] (本番環境モード)履歴APIの取得に失敗しました。サンプルデータへはフォールバックしません:', err);
+      return { incidents: [], source: 'error', error: message };
+    }
+
     // eslint-disable-next-line no-console
     console.warn('[historyApi] 履歴APIの取得に失敗したため、サンプルデータで代替します:', err);
-    const isTimeout = err && err.name === 'AbortError';
     return {
       incidents: getMockIncidentsSortedDesc(),
       source: 'mock',
-      error: isTimeout
-        ? 'APIの応答がありませんでした(10秒でタイムアウトしました)。ネットワーク環境(社内ネットワーク/VPN等の制限)をご確認ください。'
-        : (err && err.message ? err.message : String(err)),
+      error: message,
     };
   } finally {
     clearTimeout(timeoutId);

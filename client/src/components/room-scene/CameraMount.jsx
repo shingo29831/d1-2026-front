@@ -1,6 +1,5 @@
 import React, { useMemo } from 'react';
 import * as THREE from 'three';
-import { useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { CAMERA_LABEL } from '../../config';
 import { useRoomConfig } from '../../roomConfigContext';
@@ -20,16 +19,23 @@ export default function CameraMount({ mount: mountProp, yawDeg: yawProp, pitchDe
     cameraRangeM: ctxRange,
   } = useRoomConfig();
   const { theme } = useTheme();
-  // Canvasの現在の横縦比(アスペクト比)。「カメラの視点」で実際に使っている
-  // <Canvas camera={{ fov }}>のfovはthree.jsの仕様上「垂直方向」の視野角だが、
-  // 以前はこの床面の扇形(見える範囲の目安)をfovDegの値そのまま「水平方向」の
-  // 開き角として描いていたため、Canvasが正方形でない(=横長の画面がほとんど)場合、
+  // 【不具合修正】この床面の扇形(見える範囲の目安)をfovDegの値そのまま「水平方向」の
+  // 開き角として描くと、Canvasが正方形でない(=横長の画面がほとんど)場合、
   // 実際にカメラ視点で見える横方向の範囲より扇形の方が狭く描かれてしまい、
-  // 「カメラ視点と見える範囲が一致しない」という見え方の原因になっていた。
-  // ここでは垂直方向のfovDegとアスペクト比から実際の水平方向の視野角を逆算し、
-  // 扇形の開き角に使うことで、俯瞰3Dの扇形とカメラ視点の見え方を一致させる。
-  const size = useThree((state) => state.size);
-  const aspect = size.height > 0 ? size.width / size.height : 1;
+  // 「カメラ視点と見える範囲が一致しない」という見え方の原因になる。そのため
+  // 垂直方向のfovDegとアスペクト比から実際の水平方向の視野角を逆算している。
+  // ここで使うアスペクト比は、以前は<Canvas>の「今その瞬間に画面上に描画されて
+  // いるピクセルサイズ」(useThreeのstate.size)をそのまま使っていたが、これだと
+  // 「カメラ位置の設定」タブの小さいプレビュー枠と、見守りダッシュボードの
+  // 画面いっぱいに広がる横長のキャンバスとで同じアスペクト比にならず、同じ
+  // 視野角の設定値でも表示されるページによって扇形の広さが大きく変わって見えて
+  // しまう(=「視野角がおかしい」と感じる)不具合があった。実機のカメラ映像は
+  // どのページで見ても解像度が変わるわけではないため、ブラウザのウィンドウ
+  // サイズやレイアウトに左右されない、実機の映像解像度(640×480、
+  // poseGeometry.jsのIMG_W/IMG_Hと同じ4:3)を固定のアスペクト比として使うことで、
+  // どのページで表示しても同じ視野角なら同じ広さの扇形になるようにした。
+  const CAMERA_ASPECT = 640 / 480;
+  const aspect = CAMERA_ASPECT;
 
   const mount = mountProp || ctxMount;
   const yawDeg = yawProp != null ? yawProp : ctxYaw;
