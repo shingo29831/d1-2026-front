@@ -165,38 +165,96 @@ export async function getSignedIotWebSocketUrl() {
 //   });
 //   ...
 //   client.end(); // クリーンアップ時
-export async function connectIotCore(topic, onMessage) {
-  const mqttModule = await import('mqtt');
-  // Vite環境でのESM/CommonJSの差異を吸収し、ライブラリ本体を正しく取得する
-  const mqttClient = mqttModule.default || mqttModule;
-  const url = await getSignedIotWebSocketUrl();
-  const client = mqttClient.connect(url, {
-    protocolVersion: 4,
-    clean: true,
-    reconnectPeriod: 4000,
-    // IoT CoreのMQTT over WebSocketは接続ごとに一意なクライアントIDが必要。
-    clientId: `system1-web-${Math.random().toString(16).slice(2)}`,
-  });
+export async function connectIotCore(topic, onMessage, onConnect, onDisconnect, onError) {
+  let client = null;
+  let isClosed = false;
+  let reconnectTimer = null;
 
-  client.on('connect', () => {
-    if (topic) client.subscribe(topic);
-  });
-
-  client.on('message', (receivedTopic, payloadBuffer) => {
-    const text = payloadBuffer.toString();
+  async function connect() {
+    if (isClosed) return;
     try {
-      onMessage?.(receivedTopic, JSON.parse(text));
-    } catch {
-      onMessage?.(receivedTopic, text);
+      const mqttModule = await import('mqtt');
+      // Vite環境でのESM/CommonJSの差異を吸収し、ライブラリ本体を正しく取得する
+      const mqttClient = mqttModule.default || mqttModule;
+      
+      // 接続のたびに最新のSigV4署名付きURLを非同期で生成する
+      const url = await getSignedIotWebSocketUrl();
+      
+      if (isClosed) return;
+
+      client = mqttClient.connect(url, {
+        protocolVersion: 4,
+        clean: true,
+        // mqtt.js内蔵の自動再接続を無効化し、カスタム再接続ロジックを使用する
+        reconnectPeriod: 0,
+        // IoT CoreのMQTT over WebSocketは接続ごとに一意なクライアントIDが必要。
+        clientId: `system1-web-${Math.random().toString(16).slice(2)}`,
+      });
+
+      client.on('connect', () => {
+        if (topic) {
+          client.subscribe(topic);
+          console.log(`[iotClient] Subscribed to topic: ${topic}`);
+        }
+        onConnect?.();
+      });
+
+      client.on('message', (receivedTopic, payloadBuffer) => {
+        const text = payloadBuffer.toString();
+        try {
+          onMessage?.(receivedTopic, JSON.parse(text));
+        } catch {
+          onMessage?.(receivedTopic, text);
+        }
+      });
+
+      client.on('close', () => {
+        onDisconnect?.();
+        scheduleReconnect();
+      });
+
+      client.on('error', (err) => {
+        // eslint-disable-next-line no-console
+        console.error('[iotClient] MQTT接続エラー:', err);
+        onError?.(err);
+      });
+
+    } catch (err) {
+      console.error('[iotClient] 初期接続エラー:', err);
+      onError?.(err);
+      scheduleReconnect();
     }
-  });
+  }
 
-  client.on('error', (err) => {
-    // eslint-disable-next-line no-console
-    console.error('[iotClient] MQTT接続エラー:', err);
-  });
+  function scheduleReconnect() {
+    if (isClosed) return;
+    if (client) {
+      client.removeAllListeners();
+      client.on('error', () => {}); // 破棄中のエラーを無視
+      client.end(true);
+      client = null;
+    }
+    if (!reconnectTimer) {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null;
+        connect();
+      }, 4000);
+    }
+  }
 
-  return client;
+  // 初回接続を開始
+  await connect();
+
+  // クリーンアップ用の関数を返す（useDetectionPipelineのアンマウント時に呼ばれる）
+  return () => {
+    isClosed = true;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    if (client) {
+      client.removeAllListeners();
+      client.on('error', () => {});
+      client.end(true);
+    }
+  };
 }
 
 // ===================================================================

@@ -209,3 +209,8 @@ export const THRESHOLDS = {
 // 見守り対象の表示名（複数カメラ/複数部屋を想定した場合はここを配列化して拡張可能）
 export const ROOM_LABEL = 'リビング・ダイニング(1F)';
 export const CAMERA_LABEL = '見守りカメラ';
+
+// -------------------------------------------------------------------
+// AWS IoT Core で Subscribe する MQTT トピック名
+// -------------------------------------------------------------------
+export const IOT_SUBSCRIBE_TOPIC = import.meta.env.VITE_IOT_SUBSCRIBE_TOPIC || 'iot/hazard/alerts';
