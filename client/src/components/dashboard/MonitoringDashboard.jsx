@@ -5,7 +5,7 @@ import KeyLegendOverlay from './KeyLegendOverlay';
 import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
 import { footprintBounds, footprintCenter, footprintEdges } from '../../roomShapes';
-import { isInsideZone } from '../../poseGeometry';
+import { isInsideZone, imageToFloor } from '../../poseGeometry';
 import { isPositionBlocked, resolveSafePosition } from '../../roomCollision';
 import { THRESHOLDS } from '../../config';
 import { useTheme } from '../../themeContext';
@@ -46,7 +46,7 @@ export default function MonitoringDashboard({
 }) {
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'pov'
   const { theme } = useTheme();
-  const { footprint, zones, walls, furniture, roomShapeType } = useRoomConfig();
+  const { footprint, zones, walls, furniture, roomShapeType, cameraMount, cameraYawDeg } = useRoomConfig();
 
   // --------------------------------------------------------------
   // ヒートマップ表示(「見守りダッシュボードにもヒートマップを表示できる
@@ -72,14 +72,27 @@ export default function MonitoringDashboard({
   // historyApi.js経由の実データは、位置(x, z)が不明な項目がx: null, z: nullで
   // 返ってくるため、HistoryPage.jsxと同じ方針で部屋の中心に概算配置しておく
   // (発生密度の計算(incidentHeatmap.js)自体はapprox:trueの項目を除外する)。
+  // risk_suggestionの場合はピクセル座標(rawX, rawY)をフロア座標に変換する。
   const heatmapIncidents = useMemo(
-    () => heatmapHistoryState.incidents.map((i) => (
-      i.x === null || i.x === undefined || i.z === null || i.z === undefined
+    () => heatmapHistoryState.incidents.map((i) => {
+      if (i.type === 'risk_suggestion' && i.rawX != null && i.rawY != null) {
+        const floorPos = imageToFloor(i.rawX, i.rawY, { footprint, cameraMount, cameraYawDeg });
+        // APIから返るradius(ピクセル単位)をメートル単位に近似変換する(例: 100px = 1m)。
+        // 3D空間上で極端な大きさにならないよう、0.5m〜2.0mの範囲にクランプする。
+        const radiusM = i.radius ? clamp(i.radius / 100, 0.5, 2.0) : 1.0;
+        return { ...i, x: floorPos.x, z: floorPos.z, radius: radiusM, approx: false };
+      }
+      return i.x === null || i.x === undefined || i.z === null || i.z === undefined
         ? { ...i, x: heatmapRoomCenter.x, z: heatmapRoomCenter.z, approx: true }
-        : i
-    )),
-    [heatmapHistoryState.incidents, heatmapRoomCenter],
+        : i;
+    }),
+    [heatmapHistoryState.incidents, heatmapRoomCenter, footprint, cameraMount, cameraYawDeg],
   );
+
+  const riskSuggestions = useMemo(() => {
+    return heatmapIncidents.filter(i => i.type === 'risk_suggestion');
+  }, [heatmapIncidents]);
+
   const toggleHeatmap = useCallback(() => setShowHeatmap((v) => !v), []);
 
   const hasPerson = !!primaryPerson && !isLost;
@@ -355,8 +368,41 @@ export default function MonitoringDashboard({
             people={[...people, ...dummyPeople]}
             showHeatmap={showHeatmap}
             heatmapIncidents={heatmapIncidents}
+            riskSuggestions={riskSuggestions}
           />
           {selectedDummyId && <KeyLegendOverlay items={keyLegendItems} flashKey={flashKey} />}
+          
+          {/* AIリスクサジェストUI */}
+          {riskSuggestions.length > 0 && (
+            <div style={{
+              position: 'absolute',
+              top: 16,
+              left: 16,
+              background: theme.surface || 'rgba(255, 255, 255, 0.9)',
+              border: `1px solid ${theme.border || '#ccc'}`,
+              borderRadius: '8px',
+              padding: '12px',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+              zIndex: 10,
+              maxWidth: '320px',
+              pointerEvents: 'none'
+            }}>
+              <h4 style={{ margin: '0 0 8px 0', color: theme.warning || '#f59e0b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <i className="fa-solid fa-lightbulb"></i>
+                AIリスクサジェスト
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {riskSuggestions.slice(0, 3).map(s => (
+                  <div key={s.id} style={{ fontSize: '13px', color: theme.text || '#333' }}>
+                    <div style={{ fontWeight: 'bold' }}>{s.label}</div>
+                    <div style={{ fontSize: '11px', color: theme.textMuted || '#666' }}>
+                      {new Date(s.time).toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
         <NotificationPanel
           notifications={notifications}
