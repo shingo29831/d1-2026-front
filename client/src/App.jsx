@@ -192,7 +192,7 @@ function AppShell({ userEmail, authMode, onLogout }) {
   // だけをマウントする」というパフォーマンス対策の副作用。詳細はMonitoringDashboard.jsx
   // 冒頭のコメント参照)。ここで呼び出すことで、どのページを見ていても危険通知が
   // 途切れなくなる。
-  const monitoringAlerts = useMonitoringAlerts(poseData, lastPoseAt, connected);
+  const monitoringAlerts = useMonitoringAlerts(pipeline.poseData, pipeline.lastPoseAt, pipeline.connected, pipeline.iotMessage);
 
   return (
     <div style={{ position: 'relative', minHeight: '100vh', background: theme.appBg }}>
