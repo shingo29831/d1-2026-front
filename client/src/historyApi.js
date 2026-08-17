@@ -176,7 +176,12 @@ export async function fetchIncidentsSortedDesc() {
 
   try {
     const token = await getIdToken();
-    const res = await fetch(HISTORY_API_URL, {
+    
+    // Role BのDynamoDBクエリ(GSI)に必要な必須パラメータを付与
+    const url = new URL(HISTORY_API_URL);
+    url.searchParams.append('room_id', 'living_room');
+
+    const res = await fetch(url.toString(), {
       method: 'GET',
       headers: token ? { Authorization: `Bearer ${token}` } : {},
       signal: controller.signal,
