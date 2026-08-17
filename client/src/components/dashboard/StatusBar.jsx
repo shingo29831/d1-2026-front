@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { ROOM_LABEL, CAMERA_LABEL } from '../../config';
 import CameraControls from '../camera-setup/CameraControls';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 
 export default function StatusBar({
   connected,
@@ -23,6 +24,7 @@ export default function StatusBar({
   onToggleHeatmap,
 }) {
   const { theme } = useTheme();
+  const { isProduction } = useOperationMode();
   const s = useMemo(() => makeStyles(theme), [theme]);
 
   const pillColor = !connected ? theme.textFaint : hasPerson ? theme.accent : theme.warning;
@@ -45,7 +47,9 @@ export default function StatusBar({
       <div style={s.center}>
         <span
           style={{ ...s.pill, color: pillColor, border: `1px solid ${pillColor}` }}
-          title="Role C仕様書 Step 3「MQTT over WebSocketの受信」の接続状態インジケーターに相当(現状はSocket.IOによるモック接続)"
+          title={isProduction
+            ? 'Role C仕様書 Step 3「MQTT over WebSocketの受信」に対応する、AWS IoT Coreへの実際の接続状態です(本番環境モード)。'
+            : 'Role C仕様書 Step 3「MQTT over WebSocketの受信」の接続状態インジケーターに相当(現状はSocket.IOによるモック接続。デモ用データモード)'}
         >
           <span style={{ ...s.dot, background: pillColor }} />
           {pillText}

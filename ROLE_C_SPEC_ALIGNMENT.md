@@ -13,13 +13,58 @@
 
 ---
 
-**最終更新日時: 2026-08-17 12:56:45 / バージョン: 08.17.7**
+**最終更新日時: 2026-08-17 13:43:50 / バージョン: 08.17.8**
 
 (バージョンは`client/src/config.js`の`APP_VERSION`と同じ「MM.DD.N」形式です。Nはその日の
 何回目の更新かを表す通し番号で、日付が変わるとN=1から数え直します。)
 
 この日付でこのAIが反映した変更の概要(詳細は下記「更新」欄に追記していく想定です):
 
+- **「デモ用データ/本番環境」切り替えトグルの追加と、本番環境の仕様書準拠化(3件)。**
+  お客様から「現状はデモ用データで作成していると思うが、実際に仕様書通りの本番環境の
+  ものと、現在のものとを、ダークモード/ホワイトモードの切り替えの下に切り替えトグルを
+  作って、本番環境は本当に仕様書通りに作成してほしい」というご要望と、以下3点の具体的な
+  アーキテクチャ乖離のご指摘をいただき、対応した。
+  1. **フロントエンドでのカメラキャプチャ・フレーム送信の分離:** 仕様書(Role A/Role C)は
+     「カメラ映像の取得とAI推論はエッジ(EC2)側が行い、フロントエンドはMQTTを受信するだけの
+     閲覧専用」と定義しているが、`useDetectionPipeline.js`は`getUserMedia`によるWebカメラ
+     起動と、100msごとの`<canvas>`描画・`socket.emit('video-frame', ...)`を常時実行して
+     いた。新設した`operationModeContext.jsx`(`system1.operationMode.v1`にlocalStorage
+     保存。デフォルトは`demo`)の状態(`isProduction`)を`useDetectionPipeline.js`が読み、
+     本番環境モードでは`shouldCapture`を(URLの`?capture=1`指定に関わらず)強制的に`false`に
+     することで、Webカメラの起動・フレーム送信を完全に止めるようにした。
+  2. **メインパイプラインのSocket.IO依存を解消、IoT Coreへ一本化:** `useDetectionPipeline.js`の
+     IoT Core受信コールバック内で`setPoseData(data)`を呼んでしまっていた(IoT Coreが送るのは
+     `ai_hazard`等の離散イベントであり、`poseData`が期待する連続的な`{keypoints:[...]}`形式
+     ではないため、本来誤り)を削除。本番環境モードでは、Socket.IOへの接続そのものを切断し
+     (`socket.disconnect()`)、`pose-data`イベントも購読しない。IoT Core接続
+     (`connectIotCore`)も本番環境モードのときだけ行うようにし、デモ/本番でデータ経路を
+     完全に分離した(`connected`表示もモードに応じてSocket.IO/IoT Coreいずれかの実際の
+     接続状態を反映するよう修正)。
+     - **重要な設計上の判断:** 仕様書のJSONスキーマ(`ai_hazard`/`sensor_alert`/
+       `complex_alert`/`risk_suggestion`)を確認したところ、継続的な姿勢(pose)ストリームは
+       存在せず、すべて単発の離散イベントだった。そのため、デモ用データの「常時歩き続ける
+       3Dアバター」は本番環境ではそのまま再現できない。お客様と相談の上、本番環境では
+       `ai_hazard`イベント受信時に、その発生位置(`details.x`/`y`)を`imageToFloor()`で
+       フロア座標へ変換し、人型マーカー(既存の`PersonFigure`を再利用。転倒/うつ伏せ寝は
+       倒れた姿勢、危険エリア侵入は立った姿勢)を一時的に表示する方式を採用した
+       (`useMonitoringAlerts.js`に`hazardMarkers`を追加、`MonitoringDashboard.jsx`で
+       `RoomScene`の`people`に合流)。表示は、対応する危険通知が「確認」または「削除」
+       されたら消える、かつ最大15秒で自動的に消える、の両方を備えている。
+  3. **3D棒グラフのInstancedMesh化:** 仕様書Step 5が「大量のデータポイントは必ず
+     `THREE.InstancedMesh`を使用するか、カスタムシェーダーでGPU側の一括描画を行う」ことを
+     明記しているにもかかわらず、`IncidentBarChart3D.jsx`はマス目(セル)ごとに個別の
+     `<mesh>`+`<boxGeometry>`を生成しており、履歴データが数百〜数千件に増えるとドローコール
+     が跳ね上がりFPSが著しく低下する実装になっていた。単位立方体のジオメトリを1つだけ持つ
+     `<instancedMesh>`(`InstancedBars`)に置き換え、各棒の位置・高さ・色は
+     `setMatrixAt`/`setColorAt`でインスタンスごとに書き込む方式にし、1回のドローコールで
+     全ての棒を描画するようにした(件数バッジの`<Html>`表示は`BarLabels`として分離。
+     ドローコールを消費しないDOMオーバーレイのため、パフォーマンスには影響しない)。
+  - 上記の切り替えトグルは、ハンバーガーメニュー内の既存のダーク/ホワイトモード切り替え
+    ボタンのすぐ下に追加した(`HamburgerMenu.jsx`)。本番環境モードが有効なときは、
+    見守りダッシュボードの「Webカメラを使用」ボタンが「本番環境(閲覧専用)」という
+    案内文に置き換わり(`CameraControls.jsx`)、接続状態ピルのツールチップもAWS IoT Core
+    への実際の接続である旨に切り替わる(`StatusBar.jsx`)。
 - `poseGeometry.js`の`imageToFloor()`で、「見守りダッシュボードに、部屋の壁の外側に
   ぽつんと黄色い丸(AIリスクサジェストのマーカー)が浮いて表示される」とのご指摘を
   受けて調査したところ、以前修正した投影距離の上限(クランプ)処理に見落としが

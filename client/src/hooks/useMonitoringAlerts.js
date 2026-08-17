@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { analyzePerson, floorDistance, isInsideZone } from '../poseGeometry';
+import { analyzePerson, floorDistance, isInsideZone, imageToFloor } from '../poseGeometry';
 import { THRESHOLDS } from '../config';
 import { useRoomConfig } from '../roomConfigContext';
 
@@ -8,6 +8,16 @@ function nextId() {
   notifSeq += 1;
   return `n${Date.now()}_${notifSeq}`;
 }
+
+// 本番環境モードでの「一時的な人物マーカー」の最大表示時間(ms)。
+// 仕様書(Role A/Role C)のJSONスキーマには継続的な姿勢(pose)ストリームが
+// 存在せず、ai_hazardイベントは「その瞬間に何かが起きた」という単発の
+// 通知のため、検出時と同じように「歩き続ける3Dアバター」を出し続けることは
+// できない。そこでユーザーと相談の上、次の2つの表示終了条件を両方備えることにした。
+//   1. 対応する危険通知が「確認(✓)」または「削除(✕)」されたら、その場で消える。
+//   2. 上記の操作が無くても、この時間が経過したら自動的に消える
+//      (通知を放置していても、いつまでも部屋の中に人型が居座らないようにするため)。
+const HAZARD_MARKER_LIFETIME_MS = 15000;
 
 /**
  * 見守りダッシュボード用の状態管理フック。
@@ -26,6 +36,10 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   const [isLost, setIsLost] = useState(false);
   const [personCount, setPersonCount] = useState(0);
   const [allPersons, setAllPersons] = useState([]);
+  // 本番環境モードで、AWS IoT Coreから受信したai_hazardイベント(details.x/y、
+  // 画像上のピクセル座標)をもとに一時的に表示する人型マーカー。
+  // [{ id, notifId, floor:{x,z}, fallen, createdAt }, ...]
+  const [hazardMarkers, setHazardMarkers] = useState([]);
 
   // 通知の連続発生を防ぐためのクールダウン管理
   const lastFiredAt = useRef({}); // { [key]: timestamp }
@@ -65,15 +79,21 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   }, [footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg]);
   useEffect(() => { zonesRef.current = zones; }, [zones]);
 
+  // 【重要】戻り値として、実際に通知が発生した場合のみそのidを返す
+  // (クールダウン中で通知が発生しなかった場合はnullを返す)。ai_hazardイベントの
+  // 一時的な人物マーカー(hazardMarkers)は、この戻り値のidを使って対応する
+  // 通知と紐付けており、通知が「確認」または「削除」されたときに連動して
+  // マーカーも消せるようにしている(下のaddHazardMarker/通知監視effect参照)。
   const pushNotification = useCallback((key, { title, message, level }) => {
     const now = Date.now();
     const last = lastFiredAt.current[key] || 0;
-    if (now - last < THRESHOLDS.NOTIFY_COOLDOWN_MS) return;
+    if (now - last < THRESHOLDS.NOTIFY_COOLDOWN_MS) return null;
     lastFiredAt.current[key] = now;
 
+    const id = nextId();
     setNotifications((prev) => {
       const item = {
-        id: nextId(),
+        id,
         key,
         title,
         message,
@@ -83,6 +103,7 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
       };
       return [item, ...prev].slice(0, 30);
     });
+    return id;
   }, []);
 
   const dismissNotification = useCallback((id) => {
@@ -95,6 +116,20 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
 
   const clearAll = useCallback(() => setNotifications([]), []);
 
+  // 本番環境モードのai_hazardイベント用: 通知と同時に、そのイベントが起きた
+  // 場所(details.x/y。画像上のピクセル座標)を部屋のフロア座標に変換し、
+  // 一時的な人型マーカー(PersonFigureを再利用)として表示する。
+  // notifIdがnull(通知自体がクールダウンで抑制された)の場合は、対応する
+  // 通知が存在せずマーカーだけが残ってしまうのを避けるため、マーカーも作らない。
+  const addHazardMarker = useCallback((notifId, details, fallen) => {
+    if (!notifId) return;
+    if (details == null || details.x == null || details.y == null) return;
+    const floor = imageToFloor(details.x, details.y, roomConfigRef.current);
+    if (!floor || !Number.isFinite(floor.x) || !Number.isFinite(floor.z)) return;
+    const markerId = `hazard_${notifId}`;
+    setHazardMarkers((prev) => [...prev, { id: markerId, notifId, floor, fallen, createdAt: Date.now() }].slice(-20));
+  }, []);
+
   // AWS IoT Core からのリアルタイム通知 (MQTT) を監視し、
   // システム共通JSONスキーマに従って通知パネルへポップアップさせる。
   useEffect(() => {
@@ -106,24 +141,31 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
 
     if (event_type === 'ai_hazard') {
       const hazardType = details.hazard_type;
+      // 【本番環境: 一時的な人物マーカー】仕様書には継続的な姿勢ストリームが
+      // 無いため、デモ用データのような「歩き続ける3Dアバター」の代わりに、
+      // ai_hazardイベントが届いた瞬間の場所へ、人型のマーカーを数秒だけ表示する
+      // (転倒/うつ伏せ寝は倒れた姿勢、危険エリア侵入は立った姿勢で表示)。
       if (hazardType === 'fall') {
-        pushNotification(`iot_fall_${msgKey}`, {
+        const notifId = pushNotification(`iot_fall_${msgKey}`, {
           title: '転倒検知 (クラウドAI)',
           message: '転倒を検知しました。至急ご確認ください。',
           level: 'danger',
         });
+        addHazardMarker(notifId, details, true);
       } else if (hazardType === 'prone') {
-        pushNotification(`iot_prone_${msgKey}`, {
+        const notifId = pushNotification(`iot_prone_${msgKey}`, {
           title: 'うつ伏せ寝検知 (クラウドAI)',
           message: 'うつ伏せ寝を検知しました。呼吸状態にご注意ください。',
           level: 'danger',
         });
+        addHazardMarker(notifId, details, true);
       } else if (hazardType === 'intrusion') {
-        pushNotification(`iot_intrusion_${msgKey}`, {
+        const notifId = pushNotification(`iot_intrusion_${msgKey}`, {
           title: '危険エリア侵入 (クラウドAI)',
           message: '危険エリアへの侵入を検知しました。',
           level: 'danger',
         });
+        addHazardMarker(notifId, details, false);
       }
     } else if (event_type === 'sensor_alert') {
       if (details.sensor_type === 'door') {
@@ -150,7 +192,43 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
         level: details.risk_level === 'high' ? 'danger' : 'warning',
       });
     }
-  }, [iotMessage, pushNotification]);
+  }, [iotMessage, pushNotification, addHazardMarker]);
+
+  // 一時的な人物マーカー(hazardMarkers)の表示終了処理。
+  // ・対応する通知(notifId)が「確認(✓)」または「削除(✕)」されたら、その場で
+  //   マーカーも消す(通知一覧から無くなった、またはacknowledged:trueになった)。
+  // ・上記の操作が無くても、HAZARD_MARKER_LIFETIME_MSが経過したマーカーは
+  //   1秒おきのチェックで自動的に消す(通知を放置していても、いつまでも
+  //   部屋の中に人型が居座らないようにするため)。
+  useEffect(() => {
+    if (hazardMarkers.length === 0) return undefined;
+    const notifMap = new Map(notifications.map((n) => [n.id, n]));
+    setHazardMarkers((prev) => {
+      const now = Date.now();
+      const next = prev.filter((m) => {
+        const notif = notifMap.get(m.notifId);
+        const notifGone = !notif || notif.acknowledged;
+        const expired = now - m.createdAt > HAZARD_MARKER_LIFETIME_MS;
+        return !notifGone && !expired;
+      });
+      return next.length === prev.length ? prev : next;
+    });
+  }, [notifications, hazardMarkers.length]);
+
+  // 通知一覧の変化だけでは、通知にも操作にも触れないまま最大表示時間を
+  // 過ぎたマーカー(=誰も確認/削除しなかった場合)を消すきっかけが無いため、
+  // 1秒ごとに期限切れのマーカーが無いか確認する。
+  useEffect(() => {
+    if (hazardMarkers.length === 0) return undefined;
+    const timer = setInterval(() => {
+      const now = Date.now();
+      setHazardMarkers((prev) => {
+        const next = prev.filter((m) => now - m.createdAt <= HAZARD_MARKER_LIFETIME_MS);
+        return next.length === prev.length ? prev : next;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [hazardMarkers.length]);
 
   // 開閉センサーの状態が変わるたびに通知を発生させる
   // (「開閉センサーの設定」タブの状態切り替えボタン、または将来の実センサー
@@ -317,6 +395,9 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
     isLost,
     personCount,
     allPersons,
+    // 本番環境モードで、ai_hazardイベントの発生場所へ数秒だけ表示する
+    // 一時的な人物マーカー(MonitoringDashboard.jsx側でRoomSceneのpeopleに合流させる)。
+    hazardMarkers,
     // 「ダミーを置く」機能から、実際のYOLO検出を介さずに危険行為の通知を
     // 手動で発生させる(MonitoringDashboard.jsxの数字キー操作)ために公開する。
     // 実検出の通知(転倒・危険エリア侵入など)と同じ仕組み(クールダウン・

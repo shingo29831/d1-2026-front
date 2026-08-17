@@ -42,6 +42,7 @@ export default function MonitoringDashboard({
   isLost,
   personCount,
   allPersons,
+  hazardMarkers,
   pushNotification,
 }) {
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'pov'
@@ -312,6 +313,19 @@ export default function MonitoringDashboard({
     onSelect: () => setSelectedDummyId(d.id),
   }));
 
+  // 本番環境モードでAWS IoT Coreのai_hazardイベントから生成された、一時的な
+  // 人型マーカー(useMonitoringAlerts.js参照)。仕様書には継続的な姿勢ストリームが
+  // 無いため、実検出(people)のように毎フレーム座標が更新され続けることはなく、
+  // 発生した場所に数秒間だけ留まってから自動的に消える。表示位置は実検出と同じく
+  // 家具・壁にめり込まないよう安全な位置へ補正する。危険を知らせる表示のため、
+  // 常にcolorState:'danger'(赤系)で表示する。
+  const hazardPeople = (Array.isArray(hazardMarkers) ? hazardMarkers : []).map((h) => ({
+    id: `hazard-${h.id}`,
+    floor: resolveSafePosition(h.floor, { walls: collisionWalls, furniture }),
+    fallen: h.fallen,
+    colorState: 'danger',
+  }));
+
   const styles = useMemo(() => ({
     page: { display: 'flex', flexDirection: 'column', height: '100%', background: theme.appBg },
     body: { flex: 1, display: 'flex', minHeight: 0 },
@@ -365,7 +379,7 @@ export default function MonitoringDashboard({
         <div style={styles.sceneWrap}>
           <RoomScene
             viewMode={viewMode}
-            people={[...people, ...dummyPeople]}
+            people={[...people, ...dummyPeople, ...hazardPeople]}
             showHeatmap={showHeatmap}
             heatmapIncidents={heatmapIncidents}
             riskSuggestions={riskSuggestions}

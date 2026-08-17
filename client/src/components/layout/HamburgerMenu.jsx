@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 
 // 各ページに group('user'=利用者画面 / 'admin'=管理画面)を持たせ、メニュー内で
 // タブ切り替えして表示する。
@@ -13,7 +14,7 @@ import { useTheme } from '../../themeContext';
 // 「エリアの設定」の2画面に分割した)
 const PAGES = [
   { id: 'dashboard', label: '見守りダッシュボード', desc: '3Dルームでの見守りモニター', group: 'user' },
-  { id: 'history', label: '危険行為の履歴', desc: '転倒・危険エリア侵入の履歴とヒートマップ', group: 'user' },
+  { id: 'history', label: '危険行為の履歴', desc: '転倒・危険エリアへの接近の履歴とヒートマップ', group: 'user' },
   { id: 'roomSetup', label: '部屋の設定', desc: '形とサイズを入力、またはGLTF/GLBを読み込んで部屋を作成', group: 'user' },
   { id: 'cameraSetup', label: 'カメラ位置の設定', desc: '間取り図でカメラの設置位置・向き・視野角を決める', group: 'user' },
   { id: 'furnitureSetup', label: '家具の設定', desc: '家具(箱)を自由に配置', group: 'user' },
@@ -40,6 +41,7 @@ export default function HamburgerMenu({ currentPage, onNavigate, connected, embe
   // メニューを開いたとき、今見ている画面のタブ(利用者/管理)を自動的に選んでおく。
   const [activeGroup, setActiveGroup] = useState(() => groupOf(currentPage));
   const { theme, mode, toggleTheme } = useTheme();
+  const { isProduction, toggleOperationMode } = useOperationMode();
   const styles = useMemo(() => makeStyles(theme, embedded), [theme, embedded]);
   const visiblePages = useMemo(() => PAGES.filter((p) => p.group === activeGroup), [activeGroup]);
 
@@ -100,6 +102,23 @@ export default function HamburgerMenu({ currentPage, onNavigate, connected, embe
 
         <button onClick={toggleTheme} style={styles.themeToggle}>
           {mode === 'dark' ? '🌙 ダークモード' : '☀️ ホワイトモード'}
+          <span style={styles.themeToggleHint}>クリックで切り替え</span>
+        </button>
+
+        {/* デモ用データ/本番環境の切り替え。
+            ・デモ: このブラウザ端末のWebカメラ映像をYOLO中継サーバー(Socket.IO)へ
+              送って検出する、これまで通りのプロトタイプ動作。
+            ・本番: 仕様書(Role A/Role C)通り、カメラ映像の取得・AI推論はエッジ
+              (EC2)側が行い、このフロントエンドはWebカメラを一切使用せず、AWS IoT
+              CoreからのMQTT受信のみで動作する「閲覧専用」になる。 */}
+        <button
+          onClick={toggleOperationMode}
+          style={{ ...styles.themeToggle, ...(isProduction ? styles.modeToggleActive : {}) }}
+          title={isProduction
+            ? '本番環境モード: 仕様書(Role A/Role C)通り、カメラ映像の取得・AI推論はエッジ(EC2)側で行い、このフロントエンドはAWS IoT CoreからのMQTT受信のみを行う閲覧専用になります。'
+            : 'デモ用データモード: この端末のWebカメラ映像をサーバーへ送って検出する、これまで通りのプロトタイプ動作です。'}
+        >
+          {isProduction ? '🏭 本番環境(仕様書準拠)' : '🧪 デモ用データ'}
           <span style={styles.themeToggleHint}>クリックで切り替え</span>
         </button>
 
@@ -247,6 +266,14 @@ function makeStyles(theme, embedded) {
       cursor: 'pointer',
     },
     themeToggleHint: { fontSize: 10.5, color: theme.textFaint, fontWeight: 400 },
+    // 本番環境モードが有効なときは、デモ用データと見た目で区別できるよう
+    // アクセントカラーで強調する(誤ってデモ用データのままだと気づきにくい、
+    // という事故を避けるための視覚的な手がかり)。
+    modeToggleActive: {
+      background: theme.accentSoft,
+      color: theme.accent,
+      border: `1px solid ${theme.accentBorder}`,
+    },
     groupTabs: {
       display: 'flex',
       gap: 6,

@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 
 // 見守りダッシュボード上でWebカメラの状態を確認・切り替えるための小さなコントロール。
 // 「YOLOの起動・動作確認」ページへ移動しなくても、この画面のままWebカメラを
@@ -11,15 +12,21 @@ import { useTheme } from '../../themeContext';
 // ボタンを押しても映像がずっと真っ黒のままになってしまう問題があった。
 export default function CameraControls({ inputMode, requestWebcam, shouldCapture, cameraError }) {
   const { theme } = useTheme();
+  const { isProduction } = useOperationMode();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   if (shouldCapture === false) {
+    // 【本番環境モード】仕様書(Role A/Role C)通り、カメラ映像の取得・AI推論は
+    // エッジ(EC2)側の役割のため、URLに ?capture=1 を付けても本番環境モードでは
+    // Webカメラを使用しない(デモ用データモードのときだけの案内文と分けている)。
     return (
       <span
         style={styles.readonlyNote}
-        title="この端末は閲覧専用モードです。URLの末尾に ?capture=1 を付けて開くとこの端末のカメラを使用できます。"
+        title={isProduction
+          ? '本番環境モードでは、カメラ映像の取得とAI推論はエッジ(EC2)側で行うため、このフロントエンドではWebカメラを使用しません。'
+          : 'この端末は閲覧専用モードです。URLの末尾に ?capture=1 を付けて開くとこの端末のカメラを使用できます。'}
       >
-        閲覧専用モード
+        {isProduction ? '本番環境(閲覧専用)' : '閲覧専用モード'}
       </span>
     );
   }
