@@ -77,7 +77,10 @@ export default function MonitoringDashboard({
     () => heatmapHistoryState.incidents.map((i) => {
       if (i.type === 'risk_suggestion' && i.rawX != null && i.rawY != null) {
         const floorPos = imageToFloor(i.rawX, i.rawY, { footprint, cameraMount, cameraYawDeg });
-        return { ...i, x: floorPos.x, z: floorPos.z, approx: false };
+        // APIから返るradius(ピクセル単位)をメートル単位に近似変換する(例: 100px = 1m)。
+        // 3D空間上で極端な大きさにならないよう、0.5m〜2.0mの範囲にクランプする。
+        const radiusM = i.radius ? clamp(i.radius / 100, 0.5, 2.0) : 1.0;
+        return { ...i, x: floorPos.x, z: floorPos.z, radius: radiusM, approx: false };
       }
       return i.x === null || i.x === undefined || i.z === null || i.z === undefined
         ? { ...i, x: heatmapRoomCenter.x, z: heatmapRoomCenter.z, approx: true }

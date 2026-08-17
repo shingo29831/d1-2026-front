@@ -7,6 +7,7 @@ import PlaceholderRoom from './PlaceholderRoom';
 import PersonFigure from '../dashboard/PersonFigure';
 import DangerZoneMarkers from './DangerZoneMarkers';
 import DoorSensorMarkers from './DoorSensorMarkers';
+import RiskSuggestionMarkers from './RiskSuggestionMarkers';
 import CameraMount from './CameraMount';
 import HeatmapOverlay3D from './HeatmapOverlay3D';
 import HeatmapHotspots from './HeatmapHotspots';
@@ -59,6 +60,7 @@ export default function RoomScene({
   solidWalls,
   showHeatmap,
   heatmapIncidents,
+  riskSuggestions,
 }) {
   const {
     footprint: ctxFootprint,
@@ -213,6 +215,7 @@ export default function RoomScene({
 
       <DangerZoneMarkers peopleFloors={list.map((p) => p.floor)} zones={zones} />
       <DoorSensorMarkers doorSensors={doorSensors} />
+      {riskSuggestions && <RiskSuggestionMarkers suggestions={riskSuggestions} />}
       {list.map((p) => (
         <PersonFigure
           key={p.id}
