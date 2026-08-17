@@ -173,15 +173,26 @@ export async function connectIotCore(topic, onMessage, onConnect, onDisconnect, 
       });
 
       client.on('connect', () => {
+        console.log('[iotClient] MQTT接続成功 (101 Switching Protocols -> MQTT CONNECT)');
         if (topic) {
-          client.subscribe(topic);
-          console.log(`[iotClient] Subscribed to topic: ${topic}`);
+          // Subscribeの成否をコールバックで確実に判定する
+          client.subscribe(topic, (err, granted) => {
+            if (err) {
+              console.error(`[iotClient] Subscribeリクエスト失敗:`, err);
+            } else if (granted && granted[0] && granted[0].qos === 128) {
+              // IoT Core特有のエラー: WebSocketは繋がったが、IAMポリシーでSubscribeが許可されていない
+              console.error(`[iotClient] ❌ Subscribe拒否 (QoS 128)。CognitoのIAMロールに iot:Subscribe 権限がないか、リソース制限に引っかかっています。Topic: ${topic}`);
+            } else {
+              console.log(`[iotClient] ✅ Subscribed to topic: ${topic}`, granted);
+            }
+          });
         }
         onConnect?.();
       });
 
       client.on('message', (receivedTopic, payloadBuffer) => {
         const text = payloadBuffer.toString();
+        console.log(`[iotClient] 📩 メッセージ受信 [${receivedTopic}]:`, text);
         try {
           onMessage?.(receivedTopic, JSON.parse(text));
         } catch {
@@ -190,12 +201,16 @@ export async function connectIotCore(topic, onMessage, onConnect, onDisconnect, 
       });
 
       client.on('close', () => {
+        console.warn('[iotClient] MQTT接続が切断されました (close)');
         onDisconnect?.();
         scheduleReconnect();
       });
 
+      client.on('offline', () => {
+        console.warn('[iotClient] MQTT接続がオフラインになりました');
+      });
+
       client.on('error', (err) => {
-        // eslint-disable-next-line no-console
         console.error('[iotClient] MQTT接続エラー:', err);
         onError?.(err);
       });

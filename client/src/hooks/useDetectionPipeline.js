@@ -150,6 +150,7 @@ export function useDetectionPipeline() {
           IOT_SUBSCRIBE_TOPIC,
           (topic, message) => {
             if (!isMounted) return;
+            console.log('[useDetectionPipeline] アプリ層でデータを受信・反映します:', topic, message);
             try {
               const data = typeof message === 'string' ? JSON.parse(message) : message;
               setIotMessage({ topic, data, timestamp: Date.now() });
