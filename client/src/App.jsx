@@ -184,6 +184,7 @@ function AppShell({ userEmail, authMode, onLogout }) {
     shouldCapture,
     cameraError,
     requestWebcam,
+    iotMessage,
   } = useDetectionPipeline();
 
   // 転倒検知・危険エリアへの接近・開閉センサーの通知などの評価は、ここ(常時マウントの
@@ -192,7 +193,7 @@ function AppShell({ userEmail, authMode, onLogout }) {
   // だけをマウントする」というパフォーマンス対策の副作用。詳細はMonitoringDashboard.jsx
   // 冒頭のコメント参照)。ここで呼び出すことで、どのページを見ていても危険通知が
   // 途切れなくなる。
-  const monitoringAlerts = useMonitoringAlerts(pipeline.poseData, pipeline.lastPoseAt, pipeline.connected, pipeline.iotMessage);
+  const monitoringAlerts = useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage);
 
   return (
     <div style={{ position: 'relative', minHeight: '100vh', background: theme.appBg }}>
