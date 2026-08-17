@@ -214,8 +214,3 @@ export const CAMERA_LABEL = '見守りカメラ';
 // AWS IoT Core で Subscribe する MQTT トピック名
 // -------------------------------------------------------------------
 export const IOT_SUBSCRIBE_TOPIC = import.meta.env.VITE_IOT_SUBSCRIBE_TOPIC || 'iot/hazard/alerts';
-
-// -------------------------------------------------------------------
-// AWS IoT Core で Subscribe する MQTT トピック名
-// -------------------------------------------------------------------
-export const IOT_SUBSCRIBE_TOPIC = import.meta.env.VITE_IOT_SUBSCRIBE_TOPIC || 'iot/hazard/alerts';
