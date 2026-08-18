@@ -124,7 +124,12 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   const addHazardMarker = useCallback((notifId, details, fallen) => {
     if (!notifId) return;
     if (details == null || details.x == null || details.y == null) return;
-    const floor = imageToFloor(details.x, details.y, roomConfigRef.current);
+    
+    // 画像上の座標が人物の中心であると仮定し、姿勢に応じて投影先の高さを変える
+    // (床面Y=0にそのまま投影すると、レイが奥に伸びすぎて実際の立ち位置より遠くに表示されてしまうため)
+    const targetY = fallen ? 0.2 : 1.0;
+    const floor = imageToFloor(details.x, details.y, roomConfigRef.current, targetY);
+    
     if (!floor || !Number.isFinite(floor.x) || !Number.isFinite(floor.z)) return;
     const markerId = `hazard_${notifId}`;
     setHazardMarkers((prev) => [...prev, { id: markerId, notifId, floor, fallen, createdAt: Date.now() }].slice(-20));

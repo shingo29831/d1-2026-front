@@ -73,7 +73,8 @@ export function analyzePerson(keypoints, roomConfig) {
     avgConf,
     bbox,
     aspectRatio,
-    floor: imageToFloor(refX, refY, roomConfig),
+    // 足元を基準にしているため、投影先の高さオフセット(targetY)は0(床面)のままでよい
+    floor: imageToFloor(refX, refY, roomConfig, 0),
     visibleCount: visible.length,
     keypoints,
   };
@@ -90,24 +91,13 @@ export function analyzePerson(keypoints, roomConfig) {
 // これにより、パース（遠近感）が正確に反映され、単眼カメラでも高い精度で
 // 床の上の位置（メートル）を特定できるようになります。
 //
-// 【不具合修正】「カメラの向いている位置と3Dのカメラの向いている方向を実際に
-// 同じにしてほしい」「カメラから見て正確な位置に人を表示してほしい」という
-// 指摘を受けて、向きの基準を修正しました。以前の実装は「Three.jsのカメラは
-// -Z方向を向く」という一般的な前提でyaw/pitchの回転行列を組み立てていましたが、
-// このアプリの3D表示(RoomScene.jsxのカメラの視点=povCamera、CameraMount.jsxの
-// カメラアイコン・視野角の扇形)は、どちらも「yaw=0・pitch=0のとき+Z方向を向く」
-// という向き定義で実装されています。この2つの向き定義が食い違っていたため、
-// 検出した人物の投影方向が、実際にカメラが向いている方向(3D表示で見えている
-// カメラのレンズ・扇形の向き)とズレる(角度によっては前後・左右が逆になる)
-// 不具合がありました。
-// 下記ではforward(前方)・right(右)・up(上)の3本の基底ベクトルを、
-// RoomScene.jsxのpovCamera・CameraMount.jsxと完全に同じ式(forward.z =
-// cos(yaw)*cos(pitch) が正、など)で明示的に組み立ててから、画像上のピクセル
-// 位置に応じてこの基底ベクトルを合成する方式に変更し、3D表示上でカメラが
-// 実際に向いている方向と、人物の投影方向を一致させています。
-//
+// 【精度向上】投影先高さオフセット(targetY)の追加
+// MQTT等で受信した「人物の中心座標」をそのまま床面(Y=0)に投影すると、レイが
+// 足元ではなく腰や胸の高さに向かっているため、実際の立ち位置よりも奥に投影されて
+// しまう誤差がありました。targetYを指定することで、床面ではなく「人物の中心の高さ」
+// の仮想平面との交点を計算し、奥行きのズレを解消します。
 // -------------------------------------------------------------------
-export function imageToFloor(imgX, imgY, roomConfig) {
+export function imageToFloor(imgX, imgY, roomConfig, targetY = 0) {
   const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
   const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
@@ -172,36 +162,14 @@ export function imageToFloor(imgX, imgY, roomConfig) {
   const dirLen = Math.hypot(rawDir.x, rawDir.y, rawDir.z) || 1;
   const dir = { x: rawDir.x / dirLen, y: rawDir.y / dirLen, z: rawDir.z / dirLen };
 
-  // 4. レイと床面（Y=0）の交差判定
+  // 4. レイと指定平面（Y=targetY）の交差判定
   // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(t、メートル)で
-  // 床に到達するか計算する。
-  //
-  // 【不具合修正】「カメラから離れた人物の表示が不安定・不正確になる」という
-  // 報告を受けて修正。レイが水平に近づく(dir.yが0に近づく)ほど、
-  // t = -cameraMount.y / dir.y は際限なく大きくなる。人物が遠くにいるほど
-  // 画像上では小さく写り、YOLOの検出キーポイントがわずかにブレやすくなる
-  // (=dir.yがわずかにブレやすくなる)ため、この「dir.yがほぼ0のときの
-  // 割り算の急激な増幅」と組み合わさることで、遠くの人物ほどフロア座標が
-  // 実際の部屋を大きく超えて飛んだり、フレームごとに大きく揺れ動いたりする
-  // 不具合になっていた。実際の部屋の広さを大きく超える投影距離は現実的に
-  // あり得ないため、部屋の対角線の長さ(footprintBounds)をもとに、投影距離の
-  // 上限(部屋を一回り超える程度の余裕を持たせた距離)を設け、極端に水平に
-  // 近いレイでもこの上限を超えないようクランプする。
+  // 指定の高さに到達するか計算する。
   const footprint = roomConfig?.footprint || DEFAULT_FOOTPRINT;
   const roomBounds = footprintBounds(footprint);
   const roomDiagonalM = Math.hypot(roomBounds.width, roomBounds.depth);
   const MAX_RAY_DISTANCE_M = Math.max(roomDiagonalM * 1.5, 5);
 
-  // 【不具合修正】上記の投影距離の上限は「部屋の外接矩形(バウンディングボックス)」
-  // の対角線をもとに計算しているため、L字型など長方形でない部屋の場合、この上限
-  // いっぱいまで投影すると壁の外(部屋の凹んだ部分や外接矩形の外側の何もない
-  // 空間)に人物が表示されてしまうことがあった。ダッシュボードの画面外にぽつんと
-  // 円が浮いて見える不具合や、「AIリスクサジェスト」機能がこの投影座標を再利用
-  // する際に壁の外の座標を「普段行かない場所」として誤検知してしまう不具合の
-  // 原因になっていた。実際の部屋の多角形(footprint)に対してpointInPolygonで
-  // 判定し、壁の外に出てしまう場合は、カメラ位置からそのレイ方向へ二分探索で
-  // 「まだ部屋の中にいる最大の距離」を求め、その距離までのみ投影することで、
-  // 投影位置が必ず実際の壁の内側(またはすぐ手前)に収まるようにした。
   const clampRayToFootprint = (distance) => {
     const targetX = cameraMount.x + dir.x * distance;
     const targetZ = cameraMount.z + dir.z * distance;
@@ -223,38 +191,13 @@ export function imageToFloor(imgX, imgY, roomConfig) {
     return { x: cameraMount.x + dir.x * lo, z: cameraMount.z + dir.z * lo };
   };
 
-  // 床平面(Y=0)への投影で求めた距離(レイがほぼ水平・上向きで床と交差しない
+  // 指定平面(Y=targetY)への投影で求めた距離(レイがほぼ水平・上向きで交差しない
   // 場合は上限距離をそのまま採用する)。
   const floorDistanceM = dir.y >= -1e-4
     ? MAX_RAY_DISTANCE_M
-    : Math.min(-cameraMount.y / dir.y, MAX_RAY_DISTANCE_M);
+    : Math.min(-(cameraMount.y - targetY) / dir.y, MAX_RAY_DISTANCE_M);
 
   const distanceM = floorDistanceM;
-
-  // 【2026-08-18: 身長ベースの距離補正機能を撤去】この行より上の
-  // floorDistanceM(床平面への投影距離)をそのまま使う、この機能が
-  // 追加される前の状態に戻した。
-  //
-  // 経緯: 当初は「決め打ちの想定身長(1.1m)」から求めた距離と床平面投影の
-  // 距離を毎フレーム平均する実装だったが、これは実際の身長が想定値より
-  // 高い人(=ほとんどの大人)について、実際の距離に関わらず常に一定の割合
-  // (大人で約17.6%)だけ手前に引き寄せてしまう系統的な不具合があり、
-  // 「以前は部屋の奥まできれいに距離判定できていたのに、この補正を入れて
-  // から奥の判定がおかしくなった」という結果につながっていた。
-  // そこで「余裕を持たせた上限身長(2.0m)を使い、見かけの大きさから
-  // 考えて床平面投影の距離が明らかに遠すぎる場合だけクランプする」方式に
-  // 修正(MAX_PLAUSIBLE_PERSON_HEIGHT_M)し、理想的な条件下でのシミュレー
-  // ションでは通常の身長範囲では距離が圧縮されないことを確認していたが、
-  // 実際の動作で「前後・左右問わず、動きの幅が本当に少ししかない」という
-  // 別の不具合が報告された。この症状は理想化したシミュレーションの結果と
-  // 矛盾しており、実機のカメラ視野角・設置角度・YOLOの検出キーポイントの
-  // 実際の精度など、シミュレーションでは再現しきれない要因が疑われるが、
-  // このサンドボックス環境には実際のカメラ映像で検証する手段が無いため、
-  // 三度目の数式修正を試みるのではなく、身長ベースの補正機能自体を撤去し、
-  // この機能が追加される前の「床平面へのレイ投影+部屋の対角線に基づく
-  // 上限距離(MAX_RAY_DISTANCE_M)+部屋の多角形によるクランプ
-  // (clampRayToFootprint)」という、ユーザーが「以前は奥まできれいに
-  // 判定できていた」と述べていた状態に戻すことにした。
 
   // 交差点(床の上の座標。実際の壁の内側に収まるようクランプ済み)
   return clampRayToFootprint(distanceM);
