@@ -326,7 +326,12 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
       setPrimaryPerson(person);
 
       // --- 2. 転倒検知 ---
-      const fallen = person.aspectRatio < THRESHOLDS.FALL_ASPECT_RATIO;
+      // アスペクト比が横長であることに加え、下半身が見えていることを条件とする。
+      // (上半身のみが写っている場合、顔や肩の幅で横長判定されてしまう誤検知を防ぐため)
+      // ただし、極端に横長(0.3未満)の場合は下半身が隠れていても転倒とみなす。
+      const isFallenRatio = person.aspectRatio < THRESHOLDS.FALL_ASPECT_RATIO;
+      const fallen = isFallenRatio && (person.hasLowerBody || person.aspectRatio < 0.3);
+      
       if (fallen && !wasFallen.current) {
         pushNotification('fall', {
           title: '転倒検知',
