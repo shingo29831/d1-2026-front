@@ -187,8 +187,15 @@ export default function ConnectionStatusPage({
 
     try {
       const url = await getSignedIotWebSocketUrl();
-      const mqtt = await import('mqtt');
-      client = mqtt.connect(url, {
+      // 【不具合修正】Vite環境でのESM/CommonJSの差異により、`await import('mqtt')`が
+      // 返すモジュールオブジェクトそのものには`connect`関数が無く、実体は`.default`側に
+      // 入っていることがある(iotClient.jsのconnectIotCore()と同じ理由)。ここではその
+      // フォールバックが無かったため、実際にはIoT Coreへ接続できているにもかかわらず
+      // 「(intermediate value).connect is not a function」という接続テストページ
+      // 独自のエラーが表示されてしまっていた。iotClient.jsと同じ取得方法に揃えて修正した。
+      const mqttModule = await import('mqtt');
+      const mqttClient = mqttModule.default || mqttModule;
+      client = mqttClient.connect(url, {
         protocolVersion: 4,
         clean: true,
         reconnectPeriod: 0,
