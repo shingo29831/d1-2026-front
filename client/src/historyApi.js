@@ -35,7 +35,7 @@
 // を小さく案内する想定。
 import { getIdToken } from './authToken';
 import { getIncidentsSortedDesc as getMockIncidentsSortedDesc } from './incidentHistory';
-import { imageToFloor } from './poseGeometry';
+import { imageToFloor, analyzePerson } from './poseGeometry';
 
 const HISTORY_API_URL = import.meta.env.VITE_HISTORY_API_URL || '';
 
@@ -60,16 +60,30 @@ function getLocalRoomConfig() {
 function normalizeAiHazardDetails(details, roomConfig) {
   const map = HAZARD_TYPE_MAP[details && details.hazard_type];
   if (!map) return null; // 仕様書に無いhazard_typeが来た場合は無視する
-  const confPct = typeof details.confidence === 'number' ? Math.round(details.confidence * 100) : null;
 
   let x = null;
   let z = null;
   let approx = true;
 
-  // カメラの設置情報(roomConfig)を用いて、画像上のピクセル座標を3D空間の床面座標に変換する
-  if (details.x != null && details.y != null && roomConfig) {
-    // 画像上の座標が人物の中心であると仮定し、姿勢に応じて投影先の高さを変えることで精度を高める
-    // 転倒・うつ伏せは床に近い(0.2m)、侵入は立っている状態の中心(1.0m)と仮定
+  // 【不具合修正】エッジ側からの誤判定(顔面アップ時の横長バウンディングボックスによる転倒判定)を
+  // フロントエンド側で再検証して弾く。keypointsが含まれている場合はanalyzePersonを通す。
+  if (details.keypoints && Array.isArray(details.keypoints)) {
+    const person = analyzePerson(details.keypoints, roomConfig);
+    if (person) {
+      // 下半身が見えていないのに転倒(fall)と判定されている場合は誤検知として無視する
+      if (details.hazard_type === 'fall' && !person.hasLowerBody) {
+        return null;
+      }
+      if (person.floor && Number.isFinite(person.floor.x) && Number.isFinite(person.floor.z)) {
+        x = person.floor.x;
+        z = person.floor.z;
+        approx = false;
+      }
+    }
+  }
+
+  // keypointsが無い、またはanalyzePersonでfloorが取れなかった場合は従来のx/yから投影する
+  if (approx && details.x != null && details.y != null && roomConfig) {
     const targetY = (details.hazard_type === 'fall' || details.hazard_type === 'prone') ? 0.2 : 1.0;
     const floor = imageToFloor(details.x, details.y, roomConfig, targetY);
     if (floor && Number.isFinite(floor.x) && Number.isFinite(floor.z)) {
@@ -78,6 +92,8 @@ function normalizeAiHazardDetails(details, roomConfig) {
       approx = false;
     }
   }
+
+  const confPct = typeof details.confidence === 'number' ? Math.round(details.confidence * 100) : null;
 
   return {
     type: map.category,

@@ -49,6 +49,8 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   const activeZones = useRef(new Set());
   const wasVisible = useRef(false);
   const lostFiredAt = useRef(0);
+  const lastKnownPositionRef = useRef({ x: null, z: null, time: 0 });
+  const personStatesRef = useRef({}); // { personIndex: state }
 
   // 【重要】poseData/lastPoseAt/connectedは毎フレーム(検出間隔によっては300msより
   // 短い周期で)新しい値になるため、下の評価用setIntervalの依存配列に直接含めると、
@@ -121,14 +123,17 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   // 一時的な人型マーカー(PersonFigureを再利用)として表示する。
   // notifIdがnull(通知自体がクールダウンで抑制された)の場合は、対応する
   // 通知が存在せずマーカーだけが残ってしまうのを避けるため、マーカーも作らない。
-  const addHazardMarker = useCallback((notifId, details, fallen) => {
+  const addHazardMarker = useCallback((notifId, details, fallen, precalculatedFloor = null) => {
     if (!notifId) return;
-    if (details == null || details.x == null || details.y == null) return;
     
-    // 画像上の座標が人物の中心であると仮定し、姿勢に応じて投影先の高さを変える
-    // (床面Y=0にそのまま投影すると、レイが奥に伸びすぎて実際の立ち位置より遠くに表示されてしまうため)
-    const targetY = fallen ? 0.2 : 1.0;
-    const floor = imageToFloor(details.x, details.y, roomConfigRef.current, targetY);
+    let floor = precalculatedFloor;
+    if (!floor) {
+      if (details == null || details.x == null || details.y == null) return;
+      // 画像上の座標が人物の中心であると仮定し、姿勢に応じて投影先の高さを変える
+      // (床面Y=0にそのまま投影すると、レイが奥に伸びすぎて実際の立ち位置より遠くに表示されてしまうため)
+      const targetY = fallen ? 0.2 : 1.0;
+      floor = imageToFloor(details.x, details.y, roomConfigRef.current, targetY);
+    }
     
     if (!floor || !Number.isFinite(floor.x) || !Number.isFinite(floor.z)) return;
     const markerId = `hazard_${notifId}`;
@@ -145,7 +150,88 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
     const msgKey = `${event_type}_${timestamp}`;
 
     if (event_type === 'ai_hazard') {
-      const hazardType = details.hazard_type;
+      let hazardType = details.hazard_type;
+      let precalculatedFloor = null;
+
+      // 【不具合修正】エッジ側からの誤判定(顔面アップ時の横長バウンディングボックスによる転倒判定)を
+      // フロントエンド側で再検証して弾く。また、足元基準の正確な3D座標を算出する。
+      let isFalsePositive = false;
+      const now = Date.now();
+
+      // --- 速度チェック ---
+      if (details.x != null && details.y != null) {
+        const targetY = hazardType === 'fall' || hazardType === 'prone' ? 0.2 : 1.0;
+        precalculatedFloor = imageToFloor(details.x, details.y, roomConfigRef.current, targetY);
+
+        if (precalculatedFloor) {
+          const lastPos = lastKnownPositionRef.current;
+          if (lastPos.time > 0) {
+            const dt = (now - lastPos.time) / 1000;
+            if (dt > 0 && dt < 5.0) { // 過去5秒以内のデータと比較
+              const dx = precalculatedFloor.x - lastPos.x;
+              const dz = precalculatedFloor.z - lastPos.z;
+              const dist = Math.sqrt(dx * dx + dz * dz);
+              const speed = dist / dt;
+              if (speed > 4.0) { // 4m/s以上の移動はワープとして棄却
+                isFalsePositive = true;
+              }
+            }
+          }
+        }
+      }
+
+      if (details.keypoints && Array.isArray(details.keypoints)) {
+        const person = analyzePerson(details.keypoints, roomConfigRef.current);
+        if (person) {
+          precalculatedFloor = person.floor; // より正確な足元座標で上書き
+        }
+
+        if (hazardType === 'fall') {
+          const validKpts = details.keypoints.filter(k => k && k[2] > 0.5);
+          
+          // 有効なキーポイントが少なすぎる場合は誤検知とみなす
+          if (validKpts.length < 3) {
+            isFalsePositive = true;
+          } else {
+            const getKpt = (idx) => details.keypoints[idx] && details.keypoints[idx][2] > 0.5 ? details.keypoints[idx] : null;
+            // 5:l_shoulder, 6:r_shoulder
+            const shoulders = [getKpt(5), getKpt(6)].filter(Boolean);
+            // 13:l_knee, 14:r_knee, 15:l_ankle, 16:r_ankle
+            const legs = [getKpt(13), getKpt(14), getKpt(15), getKpt(16)].filter(Boolean);
+
+            // 体の一部しか見えていない（肩も脚も見えない）場合は棄却
+            if (shoulders.length === 0 && legs.length === 0) {
+              isFalsePositive = true;
+            } else if (shoulders.length > 0 && legs.length > 0) {
+              // 転倒の幾何学的チェック
+              const avgShoulderY = shoulders.reduce((sum, k) => sum + k[1], 0) / shoulders.length;
+              const avgLegY = legs.reduce((sum, k) => sum + k[1], 0) / legs.length;
+              const avgShoulderX = shoulders.reduce((sum, k) => sum + k[0], 0) / shoulders.length;
+              const avgLegX = legs.reduce((sum, k) => sum + k[0], 0) / legs.length;
+
+              const height = Math.abs(avgLegY - avgShoulderY);
+              const width = Math.abs(avgLegX - avgShoulderX);
+
+              // 幅より高さの方が大きい（立っている状態に近い）場合は棄却
+              if (height > width * 1.5) {
+                isFalsePositive = true;
+              }
+            } else if (person && !person.hasLowerBody) {
+              // 下半身が見えていないのに転倒と判定されている場合は誤検知として無視する
+              isFalsePositive = true;
+            }
+          }
+        }
+      }
+
+      if (isFalsePositive) {
+        return;
+      }
+
+      if (precalculatedFloor) {
+        lastKnownPositionRef.current = { x: precalculatedFloor.x, z: precalculatedFloor.z, time: now };
+      }
+
       // 【本番環境: 一時的な人物マーカー】仕様書には継続的な姿勢ストリームが
       // 無いため、デモ用データのような「歩き続ける3Dアバター」の代わりに、
       // ai_hazardイベントが届いた瞬間の場所へ、人型のマーカーを数秒だけ表示する
@@ -156,21 +242,21 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
           message: '転倒を検知しました。至急ご確認ください。',
           level: 'danger',
         });
-        addHazardMarker(notifId, details, true);
+        addHazardMarker(notifId, details, true, precalculatedFloor);
       } else if (hazardType === 'prone') {
         const notifId = pushNotification(`iot_prone_${msgKey}`, {
           title: 'うつ伏せ寝検知 (クラウドAI)',
           message: 'うつ伏せ寝を検知しました。呼吸状態にご注意ください。',
           level: 'danger',
         });
-        addHazardMarker(notifId, details, true);
+        addHazardMarker(notifId, details, true, precalculatedFloor);
       } else if (hazardType === 'intrusion') {
         const notifId = pushNotification(`iot_intrusion_${msgKey}`, {
           title: '危険エリア侵入 (クラウドAI)',
           message: '危険エリアへの侵入を検知しました。',
           level: 'danger',
         });
-        addHazardMarker(notifId, details, false);
+        addHazardMarker(notifId, details, false, precalculatedFloor);
       }
     } else if (event_type === 'sensor_alert') {
       if (details.sensor_type === 'door') {
@@ -292,7 +378,14 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
       const noRecentPose = !lastPoseAt || now - lastPoseAt > THRESHOLDS.LOST_TIMEOUT_MS;
       const roomConfig = roomConfigRef.current;
       const persons = poseData && Array.isArray(poseData.keypoints)
-        ? poseData.keypoints.map((kpts) => analyzePerson(kpts, roomConfig)).filter(Boolean)
+        ? poseData.keypoints.map((kpts, idx) => {
+            const prevState = personStatesRef.current[idx] || null;
+            const person = analyzePerson(kpts, roomConfig, prevState);
+            if (person) {
+              personStatesRef.current[idx] = person.state;
+            }
+            return person;
+          }).filter(Boolean)
         : [];
       const hasPerson = connected && !noRecentPose && persons.length > 0;
 
@@ -313,6 +406,7 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
         setStatusText(connected ? '検出待ち' : 'サーバー未接続');
         stationaryStartFloor.current = null;
         stationaryStartTime.current = null;
+        personStatesRef.current = {}; // 誰もいなくなったら学習状態と平滑化をリセット
         return;
       }
 
