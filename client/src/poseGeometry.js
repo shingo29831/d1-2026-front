@@ -43,12 +43,19 @@ export function analyzePerson(keypoints, roomConfig) {
   };
   const bboxW = Math.max(bbox.maxX - bbox.minX, 1);
   const bboxH = Math.max(bbox.maxY - bbox.minY, 1);
-  const aspectRatio = bboxH / bboxW; // 小さいほど「横たわっている」
+  let aspectRatio = bboxH / bboxW; // 小さいほど「横たわっている」
 
   // 下半身（腰、膝、足首）が少なくとも1つ見えているかを確認
   // 11: L Hip, 12: R Hip, 13: L Knee, 14: R Knee, 15: L Ankle, 16: R Ankle
   const lowerBodyIndices = [11, 12, 13, 14, 15, 16];
   const hasLowerBody = lowerBodyIndices.some(i => isValidKpt(keypoints[i]));
+
+  // 【不具合修正】下半身が見えない（顔面アップ等）場合、顔のパーツ配置によって
+  // バウンディングボックスが横長になり、誤って「転倒」と判定されるのを防ぐため、
+  // aspectRatioを強制的に縦長(安全側)として扱う。
+  if (!hasLowerBody) {
+    aspectRatio = Math.max(aspectRatio, 2.0);
+  }
 
   // 【精度向上】床の座標を正確に計算するため、人物の「中心」ではなく「足元（接地点）」を基準にする。
   // 足首(15,16) -> 膝(13,14) -> 腰(11,12) -> バウンディングボックス下端 の順でフォールバック。
@@ -199,8 +206,11 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0) {
 
   // 指定平面(Y=targetY)への投影で求めた距離(レイがほぼ水平・上向きで交差しない
   // 場合は上限距離をそのまま採用する)。
+  // 【不具合修正】レイが水平以上(dir.y >= -1e-4)の場合、対象はカメラのすぐ近くにいて
+  // 見切れている(顔面アップ等)可能性が高い。このとき無理に遠方(MAX_RAY_DISTANCE_M)へ
+  // 飛ばすと「離れた地点に降ってくる」現象が起きるため、カメラの足元付近(0.5m)に投影する。
   const floorDistanceM = dir.y >= -1e-4
-    ? MAX_RAY_DISTANCE_M
+    ? 0.5
     : Math.min(-(cameraMount.y - targetY) / dir.y, MAX_RAY_DISTANCE_M);
 
   const distanceM = floorDistanceM;
