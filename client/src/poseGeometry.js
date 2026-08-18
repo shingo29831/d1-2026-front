@@ -57,17 +57,33 @@ export function analyzePerson(keypoints, roomConfig) {
   const tanFovY = Math.tan(((fovDeg / 2) * Math.PI) / 180);
   const estimates = [];
 
-  // 1. 水平幅からの推定
+  // --- 体の向き（横向き）による見かけの幅の圧縮補正 ---
+  // 鼻が両肩の中央にあれば正面、どちらかに寄っていれば横を向いていると判定する
+  let horizontalCompression = 1.0;
+  const nose = isValidKpt(keypoints[0]) ? keypoints[0] : null;
+  
+  if (nose && lShoulder && rShoulder) {
+    const shoulderWidthPx = Math.abs(lShoulder[0] - rShoulder[0]);
+    const midShoulderX = (lShoulder[0] + rShoulder[0]) / 2;
+    // 鼻と肩の中点のズレ。最大で肩幅の半分(0.5)までズレる
+    const offsetRatio = Math.abs(nose[0] - midShoulderX) / (shoulderWidthPx / 2 || 1);
+    // ズレの割合をサイン波(sinθ)とみなし、コサイン(cosθ)で圧縮率を求める
+    // 完全に真横を向いている(cosθ=0)と無限大になるため、最小0.4(約66度)でクリップする
+    const sinTheta = Math.min(offsetRatio, 1.0);
+    horizontalCompression = Math.max(Math.sqrt(1 - sinTheta * sinTheta), 0.4);
+  }
+
+  // 1. 水平幅からの推定（横向き補正を適用）
   if (lShoulder && rShoulder) {
-    const px = Math.abs(lShoulder[0] - rShoulder[0]);
+    const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
     if (px > 10) estimates.push((0.38 * IMG_H) / (2 * px * tanFovY)); // 肩幅 約38cm
   }
   if (lEar && rEar) {
-    const px = Math.abs(lEar[0] - rEar[0]);
+    const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
     if (px > 10) estimates.push((0.14 * IMG_H) / (2 * px * tanFovY)); // 顔幅 約14cm
   }
   if (lEye && rEye) {
-    const px = Math.abs(lEye[0] - rEye[0]);
+    const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
     if (px > 10) estimates.push((0.065 * IMG_H) / (2 * px * tanFovY)); // 両目 約6.5cm
   }
 
