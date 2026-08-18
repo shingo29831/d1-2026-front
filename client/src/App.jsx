@@ -227,7 +227,13 @@ function AppShell({ userEmail, authMode, onLogout }) {
           playsInline
           muted
           style={videoSlot
-            ? { width: '480px', height: '360px', background: '#000', borderRadius: '8px', objectFit: 'cover' }
+            ? { 
+                width: videoSlot.dataset.dashboard ? '100%' : '480px', 
+                height: videoSlot.dataset.dashboard ? '100%' : '360px', 
+                background: '#000', 
+                borderRadius: videoSlot.dataset.dashboard ? 'inherit' : '8px', 
+                objectFit: 'cover' 
+              }
             : { position: 'fixed', top: -9999, left: -9999, width: 2, height: 2, opacity: 0, pointerEvents: 'none' }}
         />,
         videoSlot || document.body,
@@ -254,6 +260,7 @@ function AppShell({ userEmail, authMode, onLogout }) {
                 shouldCapture={shouldCapture}
                 cameraError={cameraError}
                 requestWebcam={requestWebcam}
+                registerVideoSlot={setVideoSlot}
                 {...monitoringAlerts}
               />
             </div>

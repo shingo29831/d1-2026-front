@@ -45,6 +45,7 @@ export default function MonitoringDashboard({
   allPersons,
   hazardMarkers,
   pushNotification,
+  registerVideoSlot,
 }) {
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'pov'
   const { theme } = useTheme();
@@ -102,6 +103,22 @@ export default function MonitoringDashboard({
   }, [heatmapIncidents]);
 
   const toggleHeatmap = useCallback(() => setShowHeatmap((v) => !v), []);
+
+  const [isCameraExpanded, setIsCameraExpanded] = useState(false);
+  const cameraSlotRef = useRef(null);
+
+  useEffect(() => {
+    if (registerVideoSlot) {
+      if (shouldCapture && isCameraExpanded && cameraSlotRef.current) {
+        registerVideoSlot(cameraSlotRef.current);
+      } else {
+        registerVideoSlot(null);
+      }
+    }
+    return () => {
+      if (registerVideoSlot) registerVideoSlot(null);
+    };
+  }, [shouldCapture, isCameraExpanded, registerVideoSlot]);
 
   const hasPerson = !!primaryPerson && !isLost;
   const confidencePct = hasPerson ? Math.round(primaryPerson.avgConf * 100) : 0;
@@ -422,6 +439,56 @@ export default function MonitoringDashboard({
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* デモ時のWebカメラ映像表示UI */}
+          {shouldCapture && (
+            <div style={{
+              position: 'absolute',
+              top: 16,
+              right: 16,
+              zIndex: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'flex-end',
+              gap: '8px'
+            }}>
+              <button
+                onClick={() => setIsCameraExpanded(v => !v)}
+                style={{
+                  background: theme.surface || 'rgba(255, 255, 255, 0.9)',
+                  border: `1px solid ${theme.border || '#ccc'}`,
+                  borderRadius: '8px',
+                  padding: '8px 12px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  color: theme.text || '#333',
+                  fontWeight: 'bold',
+                  fontSize: '14px',
+                }}
+              >
+                <i className="fa-solid fa-video"></i>
+                カメラ映像 {isCameraExpanded ? '非表示' : '表示'}
+              </button>
+              
+              <div
+                data-dashboard="true"
+                style={{
+                  display: isCameraExpanded ? 'block' : 'none',
+                  width: '320px',
+                  height: '240px',
+                  background: '#000',
+                  borderRadius: '8px',
+                  overflow: 'hidden',
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  border: `1px solid ${theme.border || '#ccc'}`,
+                }}
+                ref={cameraSlotRef}
+              />
             </div>
           )}
         </div>
