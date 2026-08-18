@@ -169,6 +169,7 @@ function Root() {
 function AppShell({ userEmail, authMode, onLogout }) {
   const [page, setPage] = useState('dashboard');
   const { theme } = useTheme();
+  const canvasRef = React.useRef(null);
 
   // Webカメラ/動画の実体である<video>要素を、今どのDOM要素の中に表示するか。
   // 「YOLOの起動・動作確認」ページが表示されている間はそのページ内のプレースホルダー
@@ -202,6 +203,67 @@ function AppShell({ userEmail, authMode, onLogout }) {
   // 途切れなくなる。
   const monitoringAlerts = useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage);
 
+  // 骨格描画用の接続定義 (COCO 17 keypoints)
+  const POSE_CONNECTIONS = [
+    [0, 1], [0, 2], [1, 3], [2, 4], // 頭部
+    [5, 6], [5, 7], [7, 9], [6, 8], [8, 10], // 上半身・腕
+    [5, 11], [6, 12], [11, 12], // 胴体
+    [11, 13], [13, 15], [12, 14], [14, 16] // 下半身・脚
+  ];
+
+  // poseDataが更新されるたびにキャンバスに骨格を描画する
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const video = videoRef.current;
+    if (!canvas || !video) return;
+
+    const ctx = canvas.getContext('2d');
+
+    // videoの実際の解像度に合わせてcanvasの内部解像度を設定
+    if (video.videoWidth && video.videoHeight) {
+      if (canvas.width !== video.videoWidth || canvas.height !== video.videoHeight) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+      }
+    } else {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      return;
+    }
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // poseDataの構造は { keypoints: [ [ [x,y,conf], ...17個 ], ...人数分 ] }
+    if (!poseData || !Array.isArray(poseData.keypoints)) return;
+
+    poseData.keypoints.forEach(keypoints => {
+      if (!Array.isArray(keypoints)) return;
+
+      // 線の描画
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = '#00ffcc'; // YoloCheckPageの2Dオーバーレイと同じ色に統一
+      POSE_CONNECTIONS.forEach(([i, j]) => {
+        const kp1 = keypoints[i];
+        const kp2 = keypoints[j];
+        if (kp1 && kp2 && kp1.length >= 3 && kp2.length >= 3 && kp1[2] > 0.5 && kp2[2] > 0.5) {
+          ctx.beginPath();
+          ctx.moveTo(kp1[0], kp1[1]);
+          ctx.lineTo(kp2[0], kp2[1]);
+          ctx.stroke();
+        }
+      });
+
+      // 点の描画
+      ctx.fillStyle = '#00ffcc';
+      keypoints.forEach(kp => {
+        if (kp && kp.length >= 3 && kp[2] > 0.5) {
+          ctx.beginPath();
+          ctx.arc(kp[0], kp[1], 4, 0, 2 * Math.PI);
+          ctx.fill();
+        }
+      });
+    });
+  }, [poseData, videoRef]);
+
   return (
     <div style={{ position: 'relative', minHeight: '100vh', background: theme.appBg }}>
       {/* 共通ヘッダー。メニュー開閉・アプリ名・接続状況・アカウント(ログアウト)を
@@ -221,21 +283,45 @@ function AppShell({ userEmail, authMode, onLogout }) {
           videoSlot(YoloCheckPageが登録するプレースホルダー)が無いときは
           画面外に追いやって見えないようにしておく。 */}
       {createPortal(
-        <video
-          ref={videoRef}
-          autoPlay
-          playsInline
-          muted
+        <div
           style={videoSlot
             ? { 
+                position: 'relative',
                 width: videoSlot.dataset.dashboard ? '100%' : '480px', 
                 height: videoSlot.dataset.dashboard ? '100%' : '360px', 
                 background: '#000', 
                 borderRadius: videoSlot.dataset.dashboard ? 'inherit' : '8px', 
-                objectFit: 'cover' 
+                overflow: 'hidden'
               }
-            : { position: 'fixed', top: -9999, left: -9999, width: 2, height: 2, opacity: 0, pointerEvents: 'none' }}
-        />,
+            : { position: 'fixed', top: -9999, left: -9999, width: 2, height: 2, opacity: 0, pointerEvents: 'none' }
+          }
+        >
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            style={{
+              width: '100%',
+              height: '100%',
+              objectFit: 'cover',
+              display: 'block'
+            }}
+          />
+          <canvas
+            ref={canvasRef}
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              height: '100%',
+              pointerEvents: 'none',
+              objectFit: 'cover',
+              display: 'block'
+            }}
+          />
+        </div>,
         videoSlot || document.body,
       )}
 

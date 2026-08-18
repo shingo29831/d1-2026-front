@@ -245,11 +245,41 @@ export function useDetectionPipeline() {
     const handlePoseData = (data) => {
       console.log('[useDetectionPipeline] Socket.IOからpose-dataを受信しました:', data);
       
-      // サーバー側が本番のJSONスキーマに合わせて出力するようになったため、
-      // 以前の { keypoints: [...] } 形式を期待している既存コンポーネント
-      // (PersonFigureやYoloCheckPage等) が壊れないよう、detailsの中身をposeDataとしてセットする。
-      const posePayload = data.details ? data.details : data;
-      setPoseData(posePayload);
+      // サーバーから送られてくるJSONの構造(オブジェクト/配列/ネスト)や、
+      // キーポイントの形式([x,y,conf] または {x,y,conf})がどう変化しても、
+      // 既存コンポーネントが期待する { keypoints: [ [ [x,y,conf], ... ] ] } という
+      // 厳密な三次元配列に確実に正規化して吸収する。
+      let extractedKeypoints = [];
+      if (data && Array.isArray(data.keypoints)) {
+        extractedKeypoints = data.keypoints;
+      } else if (data && data.details && Array.isArray(data.details.persons)) {
+        extractedKeypoints = data.details.persons.map(p => p.keypoints).filter(Boolean);
+      } else if (data && data.details && Array.isArray(data.details.keypoints)) {
+        // ご提示いただいたJSONのケース: details.keypoints に直接1人分の配列が入っている場合
+        // 1人分のデータとして配列で包む
+        if (data.details.keypoints.length > 0 && typeof data.details.keypoints[0][0] === 'number') {
+          extractedKeypoints = [data.details.keypoints];
+        } else {
+          extractedKeypoints = data.details.keypoints;
+        }
+      } else if (data && Array.isArray(data.details)) {
+        extractedKeypoints = data.details.map(p => p.keypoints || p).filter(Boolean);
+      } else if (Array.isArray(data)) {
+        extractedKeypoints = data.map(p => p.keypoints || p).filter(Boolean);
+      }
+
+      const normalizedKeypoints = extractedKeypoints.map(personKpts => {
+        if (!Array.isArray(personKpts)) return [];
+        return personKpts.map(kpt => {
+          if (Array.isArray(kpt)) return kpt;
+          if (kpt && typeof kpt === 'object') {
+            return [kpt.x || 0, kpt.y || 0, kpt.conf ?? kpt.score ?? 0];
+          }
+          return [0, 0, 0];
+        });
+      });
+
+      setPoseData({ keypoints: normalizedKeypoints });
       setLastPoseAt(Date.now());
 
       // デモモードでも本番と同じアラート処理(useMonitoringAlerts)を動かすため、
