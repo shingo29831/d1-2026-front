@@ -64,8 +64,12 @@ export function analyzePerson(keypoints, roomConfig) {
   const bodies = bodyIndices.map(i => keypoints[i]).filter(isValidKpt);
 
   // 両目の距離が80px以上（画面内で顔が大きく映っている）、
-  // または顔は見えているが胴体（肩・腰）が全く見えない場合はドアップとみなす
-  const isCloseUp = faceWidth > 80 || (faces.length > 0 && bodies.length === 0);
+  // 顔は見えているが胴体（肩・腰）が全く見えない、
+  // または検出されたキーポイントのバウンディングボックスが画面の大部分を占める場合はドアップとみなす
+  const isCloseUp = faceWidth > 80 || 
+                    (faces.length > 0 && bodies.length === 0) ||
+                    (bboxW > IMG_W * 0.6) || 
+                    (bboxH > IMG_H * 0.8);
   // ------------------------------
 
   // 下半身（腰、膝、足首）が少なくとも1つ見えているかを確認
@@ -234,10 +238,11 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
 
   // 指定平面(Y=targetY)への投影で求めた距離(レイがほぼ水平・上向きで交差しない
   // 場合は上限距離をそのまま採用する)。
-  // 【不具合修正】レイが水平以上(dir.y >= -1e-4)の場合、対象はカメラのすぐ近くにいて
-  // 見切れている(顔面アップ等)可能性が高い。このとき無理に遠方(MAX_RAY_DISTANCE_M)へ
-  // 飛ばすと「離れた地点に降ってくる」現象が起きるため、カメラの足元付近(0.5m)に投影する。
-  const floorDistanceM = dir.y >= -1e-4
+  // 【不具合修正】ドアップ(isCloseUp)の場合、参照座標(refY)が足元ではなく顔や胸になるため、
+  // そのレイを床面(Y=0)まで延長すると数メートル先の遠方に誤投影されてしまう。
+  // そのため、至近距離と判定された場合やレイが水平以上(dir.y >= -1e-4)の場合は
+  // カメラの足元付近(0.5m)に固定する。
+  const floorDistanceM = (isCloseUp || dir.y >= -1e-4)
     ? 0.5
     : Math.min(-(cameraMount.y - targetY) / dir.y, MAX_RAY_DISTANCE_M);
 
