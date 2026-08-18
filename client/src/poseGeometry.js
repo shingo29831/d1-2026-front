@@ -110,8 +110,9 @@ export function analyzePerson(keypoints, roomConfig) {
     aspectRatio = Math.max(aspectRatio, 2.0);
   }
 
-  // 【精度向上】床の座標を正確に計算するため、人物の「中心」ではなく「足元（接地点）」を基準にする。
-  // 足首(15,16) -> 膝(13,14) -> 腰(11,12) -> バウンディングボックス下端 の順でフォールバック。
+  // 【精度向上】床の座標を正確に計算するため、人物の「最も下にある有効な部位」を基準にする。
+  // その部位の標準的な高さを targetY としてレイキャストを行うことで、
+  // 「どの高さのカメラから見て、画面のどの位置にその部位が映るか」から距離を逆算する。
   const ankleL = keypoints[15];
   const ankleR = keypoints[16];
   const kneeL = keypoints[13];
@@ -119,38 +120,52 @@ export function analyzePerson(keypoints, roomConfig) {
   const hipL = keypoints[11];
   const hipR = keypoints[12];
 
-  let refX, refY;
-  if (isCloseUp) {
-    // ドアップの場合は足元が見えないため、バウンディングボックスの中心を使う
-    refX = (bbox.minX + bbox.maxX) / 2;
-    refY = (bbox.minY + bbox.maxY) / 2;
-  } else if (isValidKpt(ankleL) && isValidKpt(ankleR)) {
-    refX = (ankleL[0] + ankleR[0]) / 2;
-    refY = (ankleL[1] + ankleR[1]) / 2;
-  } else if (isValidKpt(kneeL) && isValidKpt(kneeR)) {
-    refX = (kneeL[0] + kneeR[0]) / 2;
-    refY = (kneeL[1] + kneeR[1]) / 2;
-  } else if (isValidKpt(hipL) && isValidKpt(hipR)) {
-    refX = (hipL[0] + hipR[0]) / 2;
-    refY = (hipL[1] + hipR[1]) / 2;
+  let refX, refY, targetY;
+
+  // 下から順に、有効な部位を探す
+  if (isValidKpt(ankleL) || isValidKpt(ankleR)) {
+    const pts = [ankleL, ankleR].filter(isValidKpt);
+    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    targetY = 0.1; // 足首の高さ(約0.1m)
+  } else if (isValidKpt(kneeL) || isValidKpt(kneeR)) {
+    const pts = [kneeL, kneeR].filter(isValidKpt);
+    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    targetY = 0.5; // 膝の高さ(約0.5m)
+  } else if (isValidKpt(hipL) || isValidKpt(hipR)) {
+    const pts = [hipL, hipR].filter(isValidKpt);
+    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    targetY = 1.0; // 腰の高さ(約1.0m)
+  } else if (isValidKpt(lShoulder) || isValidKpt(rShoulder)) {
+    const pts = [lShoulder, rShoulder].filter(isValidKpt);
+    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    targetY = 1.4; // 肩の高さ(約1.4m)
+  } else if (isCloseUp) {
+    // 顔しか見えない場合、目の中心を使う
+    const pts = [lEye, rEye, lEar, rEar, keypoints[0]].filter(isValidKpt);
+    if (pts.length > 0) {
+      refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
+      refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    } else {
+      refX = (bbox.minX + bbox.maxX) / 2;
+      refY = (bbox.minY + bbox.maxY) / 2;
+    }
+    targetY = 1.5; // 顔の高さ(約1.5m)
   } else {
     refX = (bbox.minX + bbox.maxX) / 2;
-    refY = bbox.maxY; // 足が見えない場合は枠の一番下（床に近い部分）を使用
+    refY = bbox.maxY;
+    targetY = 0.0;
   }
-
-  // 膝か足首が見えていれば、床面へのレイキャストが比較的正確に行える。
-  // 逆に腰までしか見えていない状態でレイキャストすると、実際の立ち位置より遠くにワープしてしまうため、
-  // 足元が不確かな場合は推定距離(estimatedDistanceM)を優先して使う。
-  const hasGoodLowerBody = isValidKpt(ankleL) || isValidKpt(ankleR) || isValidKpt(kneeL) || isValidKpt(kneeR);
-  const useEstimatedDistance = !hasGoodLowerBody || isCloseUp;
 
   return {
     avgConf,
     bbox,
     aspectRatio,
     hasLowerBody: isCloseUp ? false : hasLowerBody,
-    // 足元を基準にしているため、投影先の高さオフセット(targetY)は0(床面)のままでよい
-    floor: imageToFloor(refX, refY, roomConfig, 0, isCloseUp, useEstimatedDistance ? estimatedDistanceM : null),
+    floor: imageToFloor(refX, refY, roomConfig, targetY, isCloseUp, estimatedDistanceM),
     visibleCount: visible.length,
     keypoints,
     isCloseUp,
@@ -268,21 +283,26 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
     return { x: cameraMount.x + dir.x * lo, z: cameraMount.z + dir.z * lo };
   };
 
-  // 指定平面(Y=targetY)への投影で求めた距離(レイがほぼ水平・上向きで交差しない
-  // 場合は上限距離をそのまま採用する)。
-  // 【不具合修正】足元が見えない場合やドアップの場合、参照座標(refY)が足元ではなく顔や胸になり、
-  // そのレイを床面(Y=0)まで延長すると数メートル先の遠方に誤投影されてしまう。
-  // そのため、顔の幅から推定した距離(estimatedDistanceM)がある場合はそれを優先し、
-  // 無い場合はカメラの足元付近(0.5m)に固定する。
+  // 指定平面(Y=targetY)への投影で求めた距離
+  // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(メートル)で
+  // 指定の高さ(targetY)に到達するか計算する。
   let floorDistanceM;
-  if (estimatedDistanceM !== null) {
-    // estimatedDistanceM はカメラのローカルZ(前方)方向の距離。
-    // レイの方向(dir)に沿った実際の距離に変換するには dirLen を掛ける。
-    floorDistanceM = estimatedDistanceM * dirLen;
-  } else if (isCloseUp || dir.y >= -1e-4) {
-    floorDistanceM = 0.5;
+  const heightDiff = cameraMount.y - targetY;
+
+  // カメラが対象部位より高い位置にあり、かつレイが下を向いている場合のみ交差する
+  if (heightDiff > 0 && dir.y < -1e-4) {
+    floorDistanceM = -heightDiff / dir.y;
+    floorDistanceM = Math.min(floorDistanceM, MAX_RAY_DISTANCE_M);
   } else {
-    floorDistanceM = Math.min(-(cameraMount.y - targetY) / dir.y, MAX_RAY_DISTANCE_M);
+    // レイが水平・上向き、またはカメラが部位より低い(見上げる)場合は交差しないため、
+    // 顔幅等から推定した距離(estimatedDistanceM)をフォールバックとして使う。
+    if (estimatedDistanceM !== null) {
+      // estimatedDistanceM はカメラのローカルZ(前方)方向の距離。
+      // レイの方向(dir)に沿った実際の距離に変換するには dirLen を掛ける。
+      floorDistanceM = estimatedDistanceM * dirLen;
+    } else {
+      floorDistanceM = 0.5; // 最終フォールバック
+    }
   }
 
   const distanceM = floorDistanceM;
