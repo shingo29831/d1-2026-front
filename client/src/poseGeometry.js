@@ -59,6 +59,24 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   const tanFovY = Math.tan(((fovDeg / 2) * Math.PI) / 180);
   const estimates = [];
 
+  // --- 至近距離（ドアップ）判定 ---
+  let faceWidthForCloseUp = 0;
+  if (lEye && rEye) {
+    faceWidthForCloseUp = Math.abs(lEye[0] - rEye[0]);
+  } else if (lEar && rEar) {
+    faceWidthForCloseUp = Math.abs(lEar[0] - rEar[0]);
+  }
+
+  const faceIndices = [0, 1, 2, 3, 4];
+  const bodyIndices = [5, 6, 11, 12];
+  const faces = faceIndices.map(i => keypoints[i]).filter(isValidKpt);
+  const bodies = bodyIndices.map(i => keypoints[i]).filter(isValidKpt);
+
+  const isCloseUp = faceWidthForCloseUp > 80 || 
+                    (faces.length > 0 && bodies.length === 0) ||
+                    (bboxW > IMG_W * 0.6) || 
+                    (bboxH > IMG_H * 0.8);
+
   // --- 体の向き（横向き）による見かけの幅の圧縮補正 ---
   // 鼻が両肩の中央にあれば正面、どちらかに寄っていれば横を向いていると判定する
   let horizontalCompression = 1.0;
@@ -109,15 +127,16 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 
   // 2. 垂直方向（見えている部位の割合）からの推定
   // 画面下端で見切れている場合（Y=480付近）はピクセル高さが圧縮されるため除外
+  // また、ドアップ状態（isCloseUp）や肩が見えていない状態では、顔のわずかな高さのブレが
+  // 全身の高さ推定に大きく影響し、距離が遠くへ飛んでしまう原因になるため除外する。
   let estimatedFullHeightPx = null;
   let verticalCompression = 1.0;
-  if (bbox.maxY < IMG_H - 10) {
+  if (bbox.maxY < IMG_H - 10 && !isCloseUp && (lShoulder || rShoulder)) {
     let visibleRatio = 1.0;
     if (isValidKpt(keypoints[15]) || isValidKpt(keypoints[16])) visibleRatio = 1.0;
     else if (isValidKpt(keypoints[13]) || isValidKpt(keypoints[14])) visibleRatio = 0.75;
     else if (isValidKpt(keypoints[11]) || isValidKpt(keypoints[12])) visibleRatio = 0.5;
-    else if (isValidKpt(lShoulder) || isValidKpt(rShoulder)) visibleRatio = 0.25;
-    else visibleRatio = 0.15;
+    else visibleRatio = 0.25;
 
     estimatedFullHeightPx = bboxH / visibleRatio;
     
@@ -139,26 +158,6 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     estimatedDistanceM = Math.max(...estimates) * 1.2;
   }
 
-  // ドアップ判定用の顔幅（互換性維持のため目を優先）
-  let faceWidthForCloseUp = 0;
-  if (lEye && rEye) {
-    faceWidthForCloseUp = Math.abs(lEye[0] - rEye[0]);
-  } else if (lEar && rEar) {
-    faceWidthForCloseUp = Math.abs(lEar[0] - rEar[0]);
-  }
-
-  const faceIndices = [0, 1, 2, 3, 4];
-  const bodyIndices = [5, 6, 11, 12];
-  const faces = faceIndices.map(i => keypoints[i]).filter(isValidKpt);
-  const bodies = bodyIndices.map(i => keypoints[i]).filter(isValidKpt);
-
-  // 両目の距離が80px以上（画面内で顔が大きく映っている）、
-  // 顔は見えているが胴体（肩・腰）が全く見えない、
-  // または検出されたキーポイントのバウンディングボックスが画面の大部分を占める場合はドアップとみなす
-  const isCloseUp = faceWidthForCloseUp > 80 || 
-                    (faces.length > 0 && bodies.length === 0) ||
-                    (bboxW > IMG_W * 0.6) || 
-                    (bboxH > IMG_H * 0.8);
   // ------------------------------
 
   // 下半身（腰、膝、足首）が少なくとも1つ見えているかを確認
