@@ -5,7 +5,6 @@ import {
   CAMERA_YAW_DEG as DEFAULT_YAW_DEG,
   CAMERA_PITCH_DEG as DEFAULT_PITCH_DEG,
   CAMERA_FOV_DEG as DEFAULT_FOV_DEG,
-  ASSUMED_PERSON_HEIGHT_M,
 } from './config';
 import { footprintBounds, pointInPolygon } from './roomShapes';
 
@@ -16,21 +15,6 @@ import { footprintBounds, pointInPolygon } from './roomShapes';
 
 const IMG_W = 640;
 const IMG_H = 480;
-
-// 【身長ベースの距離補正のしきい値】config.jsのASSUMED_PERSON_HEIGHT_Mの
-// コメントも参照。
-// ・MIN_UPRIGHT_ASPECT_FOR_HEIGHT_HINT: バウンディングボックスの縦横比が
-//   この値以上(=明らかに縦長=立っている可能性が高い)のときだけ身長ベースの
-//   距離推定を行う。転倒・しゃがみ・着席など「見かけの身長が実際の身長と
-//   大きくズレる姿勢」では、この比率が大きく下がるため自動的に対象外になる
-//   (別途THRESHOLDS.FALL_ASPECT_RATIOで判定する「転倒」検知よりも厳しめの
-//   値にして、少しでも姿勢が怪しい場合は身長ベースの補正自体を使わない
-//   安全側の設計にしている)。
-// ・HEIGHT_DISTANCE_MIN_RATIO: 身長ベースで推定した距離が、床平面への投影
-//   距離に対してこの比率を下回るほど極端に近い場合は、キーポイントの
-//   ノイズによる誤推定の可能性が高いとみなし、補正を適用しない。
-const MIN_UPRIGHT_ASPECT_FOR_HEIGHT_HINT = 1.15;
-const HEIGHT_DISTANCE_MIN_RATIO = 0.35;
 
 function isValidKpt(k) {
   return Array.isArray(k) && k.length >= 3 && k[2] > CONF_THRESHOLD;
@@ -85,24 +69,11 @@ export function analyzePerson(keypoints, roomConfig) {
     refY = bbox.maxY; // 足が見えない場合は枠の一番下（床に近い部分）を使用
   }
 
-  // 【身長ベースの距離補正】頭部(鼻・目のいずれか)と両足首の両方がしっかり
-  // 見えており、かつ縦長の姿勢(=立っている可能性が高い)のときだけ、
-  // バウンディングボックスの高さを「見かけの身長」とみなして距離補正のヒントを
-  // 渡す。この条件を満たさない(足元や頭が隠れている、転倒・しゃがみなどで
-  // 縦横比が崩れている)場合はheightHintをnullのままにし、imageToFloor()側は
-  // 従来通り床平面への投影のみで計算する(config.jsのASSUMED_PERSON_HEIGHT_Mの
-  // コメントも参照)。
-  const hasHead = isValidKpt(keypoints[0]) || isValidKpt(keypoints[1]) || isValidKpt(keypoints[2]);
-  const hasAnkles = isValidKpt(ankleL) && isValidKpt(ankleR);
-  const heightHint = (hasHead && hasAnkles && aspectRatio >= MIN_UPRIGHT_ASPECT_FOR_HEIGHT_HINT)
-    ? { pixelHeight: bboxH, assumedHeightM: ASSUMED_PERSON_HEIGHT_M }
-    : null;
-
   return {
     avgConf,
     bbox,
     aspectRatio,
-    floor: imageToFloor(refX, refY, roomConfig, heightHint),
+    floor: imageToFloor(refX, refY, roomConfig),
     visibleCount: visible.length,
     keypoints,
   };
@@ -135,14 +106,8 @@ export function analyzePerson(keypoints, roomConfig) {
 // 位置に応じてこの基底ベクトルを合成する方式に変更し、3D表示上でカメラが
 // 実際に向いている方向と、人物の投影方向を一致させています。
 //
-// 【身長ベースの距離補正(heightHint)】第4引数heightHintを渡すと
-// ({pixelHeight, assumedHeightM})、床平面への投影で求めた距離とは別に、
-// 「画像上の見かけの身長(pixelHeight) ÷ 想定身長(assumedHeightM)」から
-// ピンホールカメラモデルで独立に距離を推定し、2つの推定値を平均して
-// 使う(下記4.の最後を参照)。省略時(null/undefined)は従来通り床平面への
-// 投影のみで計算する。
 // -------------------------------------------------------------------
-export function imageToFloor(imgX, imgY, roomConfig, heightHint) {
+export function imageToFloor(imgX, imgY, roomConfig) {
   const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
   const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
@@ -264,39 +229,32 @@ export function imageToFloor(imgX, imgY, roomConfig, heightHint) {
     ? MAX_RAY_DISTANCE_M
     : Math.min(-cameraMount.y / dir.y, MAX_RAY_DISTANCE_M);
 
-  let distanceM = floorDistanceM;
+  const distanceM = floorDistanceM;
 
-  // 【身長ベースの距離補正】config.jsのASSUMED_PERSON_HEIGHT_Mのコメントも
-  // 参照。ピンホールカメラモデル(距離 = 実際の高さ × 焦点距離(px) ÷ 見かけの
-  // 高さ(px))で、床平面への投影とは独立にもう1つの距離を推定する。焦点距離は
-  // 「画像の縦半分(IMG_H/2)が、カメラの視野角(fovDeg、上記tanFovは仕様書通り
-  // 垂直方向の半画角として扱っている)のtanでちょうど埋まる」という関係から
-  // 求める。
+  // 【2026-08-18: 身長ベースの距離補正機能を撤去】この行より上の
+  // floorDistanceM(床平面への投影距離)をそのまま使う、この機能が
+  // 追加される前の状態に戻した。
   //
-  // この推定値は、レイがほぼ水平に近づく(=遠い)ほど誤差が増幅される床平面
-  // 投影の弱点を補う一方、想定身長(assumedHeightM)が実際の身長と異なるほど
-  // 誤差を持つため、次の2つの条件をどちらも満たすときだけ採用する。
-  //   ・身長ベースの推定が床平面投影より近い距離を示している場合のみ
-  //     (遠くにいるほど誤差が「より遠くに」増幅されやすいという床平面投影の
-  //     性質上、身長ベースの推定が「より近い」と言っている場合の方が、
-  //     信頼できる補正である可能性が高いため)。
-  //   ・その推定値が床平面投影の距離のHEIGHT_DISTANCE_MIN_RATIO倍を下回る
-  //     ほど極端に近くない場合(キーポイントのノイズによる誤推定を除外)。
-  // 採用する場合も全面的な置き換えではなく、2つの推定値を平均するにとどめる
-  // (想定身長が実際の身長とズレていても、極端に間違った位置には補正されない
-  // ようにするため)。
-  if (heightHint && heightHint.pixelHeight > 0 && heightHint.assumedHeightM > 0) {
-    const focalLengthPxVertical = (IMG_H / 2) / tanFov;
-    const heightDistanceM = (heightHint.assumedHeightM * focalLengthPxVertical) / heightHint.pixelHeight;
-    if (
-      Number.isFinite(heightDistanceM) &&
-      heightDistanceM > 0 &&
-      heightDistanceM < floorDistanceM &&
-      heightDistanceM > floorDistanceM * HEIGHT_DISTANCE_MIN_RATIO
-    ) {
-      distanceM = (floorDistanceM + heightDistanceM) / 2;
-    }
-  }
+  // 経緯: 当初は「決め打ちの想定身長(1.1m)」から求めた距離と床平面投影の
+  // 距離を毎フレーム平均する実装だったが、これは実際の身長が想定値より
+  // 高い人(=ほとんどの大人)について、実際の距離に関わらず常に一定の割合
+  // (大人で約17.6%)だけ手前に引き寄せてしまう系統的な不具合があり、
+  // 「以前は部屋の奥まできれいに距離判定できていたのに、この補正を入れて
+  // から奥の判定がおかしくなった」という結果につながっていた。
+  // そこで「余裕を持たせた上限身長(2.0m)を使い、見かけの大きさから
+  // 考えて床平面投影の距離が明らかに遠すぎる場合だけクランプする」方式に
+  // 修正(MAX_PLAUSIBLE_PERSON_HEIGHT_M)し、理想的な条件下でのシミュレー
+  // ションでは通常の身長範囲では距離が圧縮されないことを確認していたが、
+  // 実際の動作で「前後・左右問わず、動きの幅が本当に少ししかない」という
+  // 別の不具合が報告された。この症状は理想化したシミュレーションの結果と
+  // 矛盾しており、実機のカメラ視野角・設置角度・YOLOの検出キーポイントの
+  // 実際の精度など、シミュレーションでは再現しきれない要因が疑われるが、
+  // このサンドボックス環境には実際のカメラ映像で検証する手段が無いため、
+  // 三度目の数式修正を試みるのではなく、身長ベースの補正機能自体を撤去し、
+  // この機能が追加される前の「床平面へのレイ投影+部屋の対角線に基づく
+  // 上限距離(MAX_RAY_DISTANCE_M)+部屋の多角形によるクランプ
+  // (clampRayToFootprint)」という、ユーザーが「以前は奥まできれいに
+  // 判定できていた」と述べていた状態に戻すことにした。
 
   // 交差点(床の上の座標。実際の壁の内側に収まるようクランプ済み)
   return clampRayToFootprint(distanceM);
