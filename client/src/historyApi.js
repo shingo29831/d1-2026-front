@@ -16,11 +16,6 @@
 //     "complex_alert" : { alert_type: "night_wandering", trigger_device, lux }
 //
 // 【重要・設計判断】
-// ・"ai_hazard"のx,yは画像上のピクセル座標であり、間取り図(床座標 x,z メートル)への
-//   変換にはRole A提供のカメラキャリブレーション行列(内部/外部パラメータ)が必要だが、
-//   まだ受領できていない。そのため、この時点ではx,zは確定できず null で返し、
-//   呼び出し側(HistoryPage.jsx)が「部屋の中心に概算配置し、位置は概算と明記する」
-//   という運用で表示する(ROLE_C_SPEC_ALIGNMENT.md参照)。
 // ・"sensor_alert"は sensor_type==="door" かつ status==="open"(ドアが開いた)の
 //   ときだけ履歴として扱う。temperature(気温)は「危険行為」ではないため対象外。
 // ・仕様書のhazard_type一覧(fall/prone/intrusion)には「誤飲」は含まれていない。
@@ -40,6 +35,7 @@
 // を小さく案内する想定。
 import { getIdToken } from './authToken';
 import { getIncidentsSortedDesc as getMockIncidentsSortedDesc } from './incidentHistory';
+import { imageToFloor } from './poseGeometry';
 
 const HISTORY_API_URL = import.meta.env.VITE_HISTORY_API_URL || '';
 
@@ -51,21 +47,46 @@ const HAZARD_TYPE_MAP = {
   intrusion: { category: 'intrusion', severity: 'danger', label: '危険エリアへの侵入を検知しました(AIによる自動検知)' },
 };
 
-function normalizeAiHazardDetails(details) {
+function getLocalRoomConfig() {
+  try {
+    const saved = localStorage.getItem('d1_room_config');
+    if (saved) return JSON.parse(saved);
+  } catch (e) {
+    // ignore
+  }
+  return null;
+}
+
+function normalizeAiHazardDetails(details, roomConfig) {
   const map = HAZARD_TYPE_MAP[details && details.hazard_type];
   if (!map) return null; // 仕様書に無いhazard_typeが来た場合は無視する
   const confPct = typeof details.confidence === 'number' ? Math.round(details.confidence * 100) : null;
+
+  let x = null;
+  let z = null;
+  let approx = true;
+
+  // カメラの設置情報(roomConfig)を用いて、画像上のピクセル座標を3D空間の床面座標に変換する
+  if (details.x != null && details.y != null && roomConfig) {
+    // 画像上の座標が人物の中心であると仮定し、姿勢に応じて投影先の高さを変えることで精度を高める
+    // 転倒・うつ伏せは床に近い(0.2m)、侵入は立っている状態の中心(1.0m)と仮定
+    const targetY = (details.hazard_type === 'fall' || details.hazard_type === 'prone') ? 0.2 : 1.0;
+    const floor = imageToFloor(details.x, details.y, roomConfig, targetY);
+    if (floor && Number.isFinite(floor.x) && Number.isFinite(floor.z)) {
+      x = floor.x;
+      z = floor.z;
+      approx = false;
+    }
+  }
+
   return {
     type: map.category,
     category: map.category,
     severity: map.severity,
     label: confPct !== null ? `${map.label}(確信度${confPct}%)` : map.label,
-    // 画像上のピクセル座標(details.x, details.y)は間取り図の床座標に変換できない
-    // (カメラキャリブレーション行列が未受領のため)。呼び出し側で部屋の中心に
-    // 概算配置してもらうため、ここでは位置未確定としてnullを返す。
-    x: null,
-    z: null,
-    approx: true,
+    x,
+    z,
+    approx,
   };
 }
 
@@ -119,12 +140,12 @@ function normalizeRiskSuggestionDetails(details) {
 // APIレスポンスの1件(仕様書の共通JSONスキーマ)を、このアプリの内部形式
 // { id, type, category, severity, label, x, z, time, approx, deviceId, roomId } に変換する。
 // 対応していないevent_type/hazard_type等の場合はnullを返し、その1件だけ無視する。
-function normalizeIncident(raw, index) {
+function normalizeIncident(raw, index, roomConfig) {
   if (!raw || typeof raw !== 'object') return null;
   if (!raw.event_type || raw.timestamp === undefined || raw.timestamp === null) return null;
 
   let base = null;
-  if (raw.event_type === 'ai_hazard') base = normalizeAiHazardDetails(raw.details);
+  if (raw.event_type === 'ai_hazard') base = normalizeAiHazardDetails(raw.details, roomConfig);
   else if (raw.event_type === 'sensor_alert') base = normalizeSensorAlertDetails(raw.details);
   else if (raw.event_type === 'complex_alert') base = normalizeComplexAlertDetails(raw.details);
   else if (raw.event_type === 'risk_suggestion') base = normalizeRiskSuggestionDetails(raw.details);
@@ -158,9 +179,6 @@ function extractList(data) {
 }
 
 // 履歴データを取得する。戻り値: { incidents, source: 'api'|'mock'|'error', error: string|null }
-// incidents内の各項目は、床座標(x, z)が不明なもの(現状の"ai_hazard"等すべて)は
-// x: null, z: null, approx: true になっている。実際の間取りに配置する処理は
-// HistoryPage.jsx側(部屋の中心へフォールバック)に委ねる。
 //
 // 【重要・本番環境モードでの挙動】opts.isProductionがtrueのとき(ハンバーガー
 // メニューの「本番環境」モード)は、取得に失敗しても`incidentHistory.js`の
@@ -186,7 +204,7 @@ function extractList(data) {
 // 【重要】この関数自体はデモ/本番モードを一切見ない、実データへの問い合わせのみを
 // 行う低レベル処理。呼び出し側(fetchIncidentsSortedDesc / checkHistoryApiConnectivity)
 // が、いつこれを呼ぶかを判断する。
-async function fetchRealIncidentsFromApi() {
+async function fetchRealIncidentsFromApi(roomConfig) {
   if (!HISTORY_API_URL) {
     return {
       incidents: [],
@@ -224,7 +242,7 @@ async function fetchRealIncidentsFromApi() {
       throw new Error('APIレスポンスの形式が想定と異なります(配列が見つかりません)');
     }
     const incidents = rawList
-      .map((raw, i) => normalizeIncident(raw, i))
+      .map((raw, i) => normalizeIncident(raw, i, roomConfig))
       .filter(Boolean)
       .sort((a, b) => new Date(b.time) - new Date(a.time));
 
@@ -245,6 +263,7 @@ async function fetchRealIncidentsFromApi() {
 
 export async function fetchIncidentsSortedDesc(opts = {}) {
   const isProduction = !!opts.isProduction;
+  const roomConfig = opts.roomConfig || getLocalRoomConfig();
 
   // 【重要・バグ修正】以前は、デモ用データモードであってもVITE_HISTORY_API_URLが
   // 設定されていれば実際のAWS履歴APIへ問い合わせてしまい、「デモ用データモードでは
@@ -260,7 +279,7 @@ export async function fetchIncidentsSortedDesc(opts = {}) {
     return { incidents: getMockIncidentsSortedDesc(), source: 'mock', error: null };
   }
 
-  const result = await fetchRealIncidentsFromApi();
+  const result = await fetchRealIncidentsFromApi(roomConfig);
   if (result.source === 'error') {
     // 【重要】本番環境モードではサンプルデータへフォールバックしない
     // (このファイル冒頭のコメント参照)。
@@ -281,5 +300,5 @@ export async function fetchIncidentsSortedDesc(opts = {}) {
 // 参照)こととは別の関心事のため、あえてfetchIncidentsSortedDescは使わず、
 // この専用関数を用意している。
 export async function checkHistoryApiConnectivity() {
-  return fetchRealIncidentsFromApi();
+  return fetchRealIncidentsFromApi(getLocalRoomConfig());
 }
