@@ -121,14 +121,17 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   // 一時的な人型マーカー(PersonFigureを再利用)として表示する。
   // notifIdがnull(通知自体がクールダウンで抑制された)の場合は、対応する
   // 通知が存在せずマーカーだけが残ってしまうのを避けるため、マーカーも作らない。
-  const addHazardMarker = useCallback((notifId, details, fallen) => {
+  const addHazardMarker = useCallback((notifId, details, fallen, precalculatedFloor = null) => {
     if (!notifId) return;
-    if (details == null || details.x == null || details.y == null) return;
     
-    // 画像上の座標が人物の中心であると仮定し、姿勢に応じて投影先の高さを変える
-    // (床面Y=0にそのまま投影すると、レイが奥に伸びすぎて実際の立ち位置より遠くに表示されてしまうため)
-    const targetY = fallen ? 0.2 : 1.0;
-    const floor = imageToFloor(details.x, details.y, roomConfigRef.current, targetY);
+    let floor = precalculatedFloor;
+    if (!floor) {
+      if (details == null || details.x == null || details.y == null) return;
+      // 画像上の座標が人物の中心であると仮定し、姿勢に応じて投影先の高さを変える
+      // (床面Y=0にそのまま投影すると、レイが奥に伸びすぎて実際の立ち位置より遠くに表示されてしまうため)
+      const targetY = fallen ? 0.2 : 1.0;
+      floor = imageToFloor(details.x, details.y, roomConfigRef.current, targetY);
+    }
     
     if (!floor || !Number.isFinite(floor.x) || !Number.isFinite(floor.z)) return;
     const markerId = `hazard_${notifId}`;
@@ -145,7 +148,22 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
     const msgKey = `${event_type}_${timestamp}`;
 
     if (event_type === 'ai_hazard') {
-      const hazardType = details.hazard_type;
+      let hazardType = details.hazard_type;
+      let precalculatedFloor = null;
+
+      // 【不具合修正】エッジ側からの誤判定(顔面アップ時の横長バウンディングボックスによる転倒判定)を
+      // フロントエンド側で再検証して弾く。また、足元基準の正確な3D座標を算出する。
+      if (details.keypoints && Array.isArray(details.keypoints)) {
+        const person = analyzePerson(details.keypoints, roomConfigRef.current);
+        if (person) {
+          if (hazardType === 'fall' && !person.hasLowerBody) {
+            // 下半身が見えていないのに転倒と判定されている場合は誤検知として無視する
+            return;
+          }
+          precalculatedFloor = person.floor;
+        }
+      }
+
       // 【本番環境: 一時的な人物マーカー】仕様書には継続的な姿勢ストリームが
       // 無いため、デモ用データのような「歩き続ける3Dアバター」の代わりに、
       // ai_hazardイベントが届いた瞬間の場所へ、人型のマーカーを数秒だけ表示する
@@ -156,21 +174,21 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
           message: '転倒を検知しました。至急ご確認ください。',
           level: 'danger',
         });
-        addHazardMarker(notifId, details, true);
+        addHazardMarker(notifId, details, true, precalculatedFloor);
       } else if (hazardType === 'prone') {
         const notifId = pushNotification(`iot_prone_${msgKey}`, {
           title: 'うつ伏せ寝検知 (クラウドAI)',
           message: 'うつ伏せ寝を検知しました。呼吸状態にご注意ください。',
           level: 'danger',
         });
-        addHazardMarker(notifId, details, true);
+        addHazardMarker(notifId, details, true, precalculatedFloor);
       } else if (hazardType === 'intrusion') {
         const notifId = pushNotification(`iot_intrusion_${msgKey}`, {
           title: '危険エリア侵入 (クラウドAI)',
           message: '危険エリアへの侵入を検知しました。',
           level: 'danger',
         });
-        addHazardMarker(notifId, details, false);
+        addHazardMarker(notifId, details, false, precalculatedFloor);
       }
     } else if (event_type === 'sensor_alert') {
       if (details.sensor_type === 'door') {
