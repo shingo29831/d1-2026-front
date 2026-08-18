@@ -65,27 +65,7 @@ export function analyzePerson(keypoints, roomConfig) {
 
   // 両目の距離が80px以上（画面内で顔が大きく映っている）、
   // または顔は見えているが胴体（肩・腰）が全く見えない場合はドアップとみなす
-  if (faceWidth > 80 || (faces.length > 0 && bodies.length === 0)) {
-    let floor = { x: 0, z: 0 };
-    if (roomConfig && roomConfig.cameraMount) {
-      const yawRad = (roomConfig.cameraYawDeg || 0) * (Math.PI / 180);
-      const dist = 0.5; // カメラの0.5m前
-      floor = {
-        x: roomConfig.cameraMount.x + dist * Math.sin(yawRad),
-        z: roomConfig.cameraMount.z - dist * Math.cos(yawRad)
-      };
-    }
-    return {
-      avgConf,
-      bbox,
-      aspectRatio: Math.max(aspectRatio, 2.0), // 転倒判定されないように安全な比率にする
-      hasLowerBody: false,
-      floor,
-      visibleCount: visible.length,
-      keypoints,
-      isCloseUp: true
-    };
-  }
+  const isCloseUp = faceWidth > 80 || (faces.length > 0 && bodies.length === 0);
   // ------------------------------
 
   // 下半身（腰、膝、足首）が少なくとも1つ見えているかを確認
@@ -96,7 +76,7 @@ export function analyzePerson(keypoints, roomConfig) {
   // 【不具合修正】下半身が見えない（顔面アップ等）場合、顔のパーツ配置によって
   // バウンディングボックスが横長になり、誤って「転倒」と判定されるのを防ぐため、
   // aspectRatioを強制的に縦長(安全側)として扱う。
-  if (!hasLowerBody) {
+  if (!hasLowerBody || isCloseUp) {
     aspectRatio = Math.max(aspectRatio, 2.0);
   }
 
@@ -110,7 +90,11 @@ export function analyzePerson(keypoints, roomConfig) {
   const hipR = keypoints[12];
 
   let refX, refY;
-  if (isValidKpt(ankleL) && isValidKpt(ankleR)) {
+  if (isCloseUp) {
+    // ドアップの場合は足元が見えないため、バウンディングボックスの中心を使う
+    refX = (bbox.minX + bbox.maxX) / 2;
+    refY = (bbox.minY + bbox.maxY) / 2;
+  } else if (isValidKpt(ankleL) && isValidKpt(ankleR)) {
     refX = (ankleL[0] + ankleR[0]) / 2;
     refY = (ankleL[1] + ankleR[1]) / 2;
   } else if (isValidKpt(kneeL) && isValidKpt(kneeR)) {
@@ -128,11 +112,12 @@ export function analyzePerson(keypoints, roomConfig) {
     avgConf,
     bbox,
     aspectRatio,
-    hasLowerBody,
+    hasLowerBody: isCloseUp ? false : hasLowerBody,
     // 足元を基準にしているため、投影先の高さオフセット(targetY)は0(床面)のままでよい
-    floor: imageToFloor(refX, refY, roomConfig, 0),
+    floor: imageToFloor(refX, refY, roomConfig, 0, isCloseUp),
     visibleCount: visible.length,
     keypoints,
+    isCloseUp,
   };
 }
 
@@ -153,7 +138,7 @@ export function analyzePerson(keypoints, roomConfig) {
 // しまう誤差がありました。targetYを指定することで、床面ではなく「人物の中心の高さ」
 // の仮想平面との交点を計算し、奥行きのズレを解消します。
 // -------------------------------------------------------------------
-export function imageToFloor(imgX, imgY, roomConfig, targetY = 0) {
+export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = false) {
   const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
   const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
