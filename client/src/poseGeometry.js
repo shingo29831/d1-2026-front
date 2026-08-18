@@ -57,7 +57,7 @@ export function analyzePerson(keypoints, roomConfig) {
   const tanFovY = Math.tan(((fovDeg / 2) * Math.PI) / 180);
   const estimates = [];
 
-  // 距離推定用：肩幅、顔幅、両目のピクセル幅からそれぞれ距離を計算し、平均をとることで精度を上げる
+  // 1. 水平幅からの推定
   if (lShoulder && rShoulder) {
     const px = Math.abs(lShoulder[0] - rShoulder[0]);
     if (px > 10) estimates.push((0.38 * IMG_H) / (2 * px * tanFovY)); // 肩幅 約38cm
@@ -71,9 +71,35 @@ export function analyzePerson(keypoints, roomConfig) {
     if (px > 10) estimates.push((0.065 * IMG_H) / (2 * px * tanFovY)); // 両目 約6.5cm
   }
 
+  // 2. 垂直方向（見えている部位の割合）からの推定
+  // 画面下端で見切れている場合（Y=480付近）はピクセル高さが圧縮されるため除外
+  if (bbox.maxY < IMG_H - 10) {
+    let visibleRatio = 1.0;
+    if (isValidKpt(keypoints[15]) || isValidKpt(keypoints[16])) visibleRatio = 1.0;
+    else if (isValidKpt(keypoints[13]) || isValidKpt(keypoints[14])) visibleRatio = 0.75;
+    else if (isValidKpt(keypoints[11]) || isValidKpt(keypoints[12])) visibleRatio = 0.5;
+    else if (isValidKpt(lShoulder) || isValidKpt(rShoulder)) visibleRatio = 0.25;
+    else visibleRatio = 0.15;
+
+    const estimatedFullHeightPx = bboxH / visibleRatio;
+    const PERSON_HEIGHT_M = 1.6; // 一般的な成人の身長
+    
+    // カメラのピッチ角（上下の傾き）による見かけの高さの圧縮を補正
+    // カメラが下（俯瞰）や上（仰瞰）を向いているほど、直立した人物は画面上で短く映る
+    const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
+    const pitchRad = (pitchDeg * Math.PI) / 180;
+    const verticalCompression = Math.max(Math.cos(pitchRad), 0.3); // 極端な角度でも最低30%は確保
+    const apparentHeightM = PERSON_HEIGHT_M * verticalCompression;
+
+    const verticalEstimate = (apparentHeightM * IMG_H) / (2 * estimatedFullHeightPx * tanFovY);
+    estimates.push(verticalEstimate);
+  }
+
   let estimatedDistanceM = null;
   if (estimates.length > 0) {
-    estimatedDistanceM = estimates.reduce((a, b) => a + b, 0) / estimates.length;
+    // キーポイントは実際の幅より内側に出やすいため、最も遠い推定値を採用する
+    // さらに、WebカメラのFOVが対角視野角で入力されているケースを考慮し 1.2 倍の補正をかける
+    estimatedDistanceM = Math.max(...estimates) * 1.2;
   }
 
   // ドアップ判定用の顔幅（互換性維持のため目を優先）
@@ -283,29 +309,38 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
     return { x: cameraMount.x + dir.x * lo, z: cameraMount.z + dir.z * lo };
   };
 
-  // 指定平面(Y=targetY)への投影で求めた距離
-  // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(メートル)で
-  // 指定の高さ(targetY)に到達するか計算する。
   let floorDistanceM;
-  const heightDiff = cameraMount.y - targetY;
 
-  // カメラが対象部位より高い位置にあり、かつレイが下を向いている場合のみ交差する
-  if (heightDiff > 0 && dir.y < -1e-4) {
-    floorDistanceM = -heightDiff / dir.y;
-    floorDistanceM = Math.min(floorDistanceM, MAX_RAY_DISTANCE_M);
+  // カメラから対象ピクセルへ向かうレイが、水平よりも下を向いているか（俯瞰）
+  // dir.y が負なら下向き。-0.05 は約3度以上下を向いていることを意味する
+  const isLookingDown = dir.y < -0.05;
+
+  if (targetY <= 0.5 && isLookingDown) {
+    // 足首(0.1)や膝(0.5)が見えていて、かつレイがしっかり下を向いている場合は
+    // 床面との交差角度が十分に取れるため、レイキャストが最も正確になる
+    const heightDiff = cameraMount.y - targetY;
+    if (heightDiff * dir.y < 0) {
+      floorDistanceM = -heightDiff / dir.y;
+    } else {
+      floorDistanceM = estimatedDistanceM !== null ? estimatedDistanceM * dirLen : 0.5;
+    }
   } else {
-    // レイが水平・上向き、またはカメラが部位より低い(見上げる)場合は交差しないため、
-    // 顔幅等から推定した距離(estimatedDistanceM)をフォールバックとして使う。
+    // カメラが水平〜上向きの場合、レイキャストは無限遠に飛んだり空を向いたりして破綻する。
+    // また、腰(1.0)や肩(1.4)しか見えていない場合も、姿勢による高さのブレが大きいため、
+    // どちらの場合もピクセル幅・高さからの推定距離を最優先する。
     if (estimatedDistanceM !== null) {
-      // estimatedDistanceM はカメラのローカルZ(前方)方向の距離。
-      // レイの方向(dir)に沿った実際の距離に変換するには dirLen を掛ける。
       floorDistanceM = estimatedDistanceM * dirLen;
     } else {
-      floorDistanceM = 0.5; // 最終フォールバック
+      const heightDiff = cameraMount.y - targetY;
+      if (Math.abs(dir.y) > 1e-4 && (heightDiff * dir.y < 0)) {
+        floorDistanceM = -heightDiff / dir.y;
+      } else {
+        floorDistanceM = 0.5;
+      }
     }
   }
 
-  const distanceM = floorDistanceM;
+  const distanceM = Math.min(floorDistanceM, MAX_RAY_DISTANCE_M);
 
   // 交差点(床の上の座標。実際の壁の内側に収まるようクランプ済み)
   return clampRayToFootprint(distanceM);
