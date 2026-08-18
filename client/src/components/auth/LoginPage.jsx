@@ -18,11 +18,12 @@ import { describeCognitoError } from '../../cognitoErrors';
 // Amplifyの`signIn({ username, password })`もその場で渡された値をその場でしか
 // 使わない(保存されない)。
 //
-// 「ログイン状態を保持する」のチェックを外すと、ブラウザを閉じる(タブを閉じる/
-// 再読み込みする)と再度ログインが必要になる(localStorageのフラグに保存しないため。
-// ただしAmplify自体はCognitoのトークンを独自にlocalStorageへ保存する仕様のため、
-// 実際のCognitoログイン時はこのチェックの有無に関わらずAmplify側のセッションは
-// 残る点に注意。App.jsxのRootコンポーネントも参照)。
+// 【重要】以前は「ログイン状態を保持する」チェックボックスがあり、ONにすると
+// localStorageへ認証フラグを保存してブラウザを閉じてもログインしたままに
+// できたが、「サイトを開いたら必ずログイン画面から始まるようにしてほしい」
+// との要望を受けて廃止した。ログイン状態はApp.jsx側でReactのstateのみとして
+// 保持するため、ページの再読み込みやブラウザを開き直すと必ずこの画面に戻る
+// (App.jsxのRootコンポーネントも参照)。
 //
 // 「ゲストとして続ける」は、Cognitoとは無関係のオフライン/デモ用モックログイン
 // (このAIの開発サンドボックスのようにAWSへ通信できない環境での確認用)。
@@ -30,7 +31,6 @@ export default function LoginPage({ onLogin }) {
   const { theme } = useTheme();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [remember, setRemember] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
 
@@ -43,7 +43,7 @@ export default function LoginPage({ onLogin }) {
     if (!isCognitoConfigured) {
       // Cognitoの環境変数が無い場合は、これまで通りのモック認証(常にログイン成功)。
       setSubmitting(true);
-      onLogin({ email: email.trim(), mode: 'mock' }, remember);
+      onLogin({ email: email.trim(), mode: 'mock' });
       return;
     }
 
@@ -59,7 +59,7 @@ export default function LoginPage({ onLogin }) {
         password,
       });
       if (isSignedIn) {
-        onLogin({ email: email.trim(), mode: 'cognito' }, remember);
+        onLogin({ email: email.trim(), mode: 'cognito' });
       } else {
         setError(
           `追加の手続きが必要なため、この画面だけではログインできません` +
@@ -106,16 +106,6 @@ export default function LoginPage({ onLogin }) {
             />
           </label>
 
-          <label style={s.rememberRow}>
-            <input
-              type="checkbox"
-              checked={remember}
-              onChange={(e) => setRemember(e.target.checked)}
-              style={s.checkbox}
-            />
-            ログイン状態を保持する
-          </label>
-
           <button type="submit" style={s.submitBtn} disabled={submitting}>
             ログイン
           </button>
@@ -123,7 +113,7 @@ export default function LoginPage({ onLogin }) {
           <button
             type="button"
             style={s.guestBtn}
-            onClick={() => onLogin({ email: '', mode: 'mock' }, remember)}
+            onClick={() => onLogin({ email: '', mode: 'mock' })}
           >
             ゲストとして続ける(デモ用・認証なし)
           </button>
@@ -172,11 +162,6 @@ function makeStyles(theme) {
       fontSize: 14,
       boxSizing: 'border-box',
     },
-    rememberRow: {
-      display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: theme.textMuted,
-      fontWeight: 500, cursor: 'pointer', userSelect: 'none',
-    },
-    checkbox: { width: 15, height: 15, accentColor: theme.accent, cursor: 'pointer' },
     submitBtn: {
       marginTop: 4,
       padding: '11px 16px',

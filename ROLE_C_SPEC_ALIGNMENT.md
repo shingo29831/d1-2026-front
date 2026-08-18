@@ -13,14 +13,65 @@
 
 ---
 
-**最終更新日時: 2026-08-17 23:36:00(日本時間) / バージョン: 08.17.10**
+**最終更新日時: 2026-08-18 02:25:00(日本時間) / バージョン: 08.18.1**
 
 (バージョンは`client/src/config.js`の`APP_VERSION`と同じ「MM.DD.N」形式です。Nはその日の
 何回目の更新かを表す通し番号で、日付が変わるとN=1から数え直します。「最終更新日時」は
 2026-08-17分の更新から日本時間(JST, UTC+9)で記載しています。それより前の日付の更新は
 UTC(協定世界時)で記載されていたためご注意ください。)
 
-この日付でこのAIが反映した変更の概要(詳細は下記「更新」欄に追記していく想定です):
+2026-08-18にこのAIが反映した変更の概要:
+
+- **本番環境モードのデータ取得の厳格化と、デモ用データモードでのデータ編集機能の追加。**
+  「本番環境モードは完全にデータなどは仕様書通りに取得するように作成してほしい。なお
+  デモ環境ではすべてのデータの入力や変更ができるようにしてほしい。普段行かない場所への
+  アクセス、危険行為履歴、危険エリアの指定、家具の設定、カメラの設定などのデータがいる
+  ものはすべてデータを修正したり変更できるように作成してほしい」というご依頼を受けて対応した。
+  - **本番環境モード:** `historyApi.js`の`fetchIncidentsSortedDesc()`は、以前は本番環境
+    モードでも履歴API取得に失敗すると`incidentHistory.js`のサンプルデータへ自動的に
+    フォールバックしていた(実際にはデータを取得できていないのに、それらしいサンプル
+    データが表示され続けるため気づきにくいという問題があった)。本番環境モードのときは
+    フォールバックせず、`source: 'error'`・`incidents: []`を返し、`HistoryPage.jsx`・
+    `MonitoringDashboard.jsx`(ヒートマップ)・`ConnectionStatusPage.jsx`のいずれでも
+    「取得できませんでした」と明確に表示するようにした。
+  - **デモ用データモード:** 家具・危険エリア・カメラの設定は既存の各設定タブから編集
+    できていたが、「危険行為の履歴」(AIリスクサジェスト「普段行かない場所へのアクセス」を
+    含む)には画面から編集する手段が無く、`incidentHistory.js`内の直書きサンプルデータの
+    ままだった。新規ページ`IncidentDataEditorPage.jsx`を追加し、間取り図上のクリック/
+    ドラッグ、または一覧上の入力欄から、危険行為履歴(AIリスクサジェストを含む全カテゴリ)を
+    自由に追加・編集・削除できるようにした(この端末のブラウザのlocalStorageに保存。
+    `incidentHistory.js`に`addIncident()`/`updateIncident()`/`removeIncident()`/
+    `resetIncidents()`を追加)。「データの編集は利用者画面ではなく管理画面で行えるように
+    してほしい、利用者画面はこれまで通りにしてほしい」というご要望を受け、この編集ページは
+    ハンバーガーメニューの「管理画面」タブに配置している(`HamburgerMenu.jsx`の
+    `group: 'admin'`。本番環境モードのときはメニュー自体から隠れ、直接ページへ遷移しても
+    編集不可の案内表示に切り替わる)。
+  - **不具合修正(デモ用データモードが実データへ通信してしまっていた):** 上記の編集機能を
+    追加した直後、見守りダッシュボードのAIリスクサジェスト表示に、編集したはずのないデータ
+    (実際のAWS履歴API側の`system_logic_01`由来と思われる、位置情報の候補が2パターンしかない
+    近い時刻のデータ)がそのまま表示されるとのご指摘があり調査した。デモ用データモードでも
+    `VITE_HISTORY_API_URL`が設定されていれば実際のAWS履歴APIへ問い合わせてしまい、画面には
+    編集内容ではなく実データが表示される不具合が見つかった。デモ用データモードのときは
+    履歴APIの設定有無に関わらず実データへ一切通信せず、常にこの端末で編集可能なデータを
+    返すよう修正した(実データへの通信は本番環境モードのときのみ)。ただし「接続状況」
+    診断ページ(実際にAWSと通信できているかを確認する目的のページ)まで一律に実データへ
+    通信しなくなると診断本来の目的を果たせなくなるため、モードに関わらず常に実際のAWS
+    履歴APIへの疎通を試みる専用関数`checkHistoryApiConnectivity()`を新設し、
+    `ConnectionStatusPage.jsx`の履歴API診断だけはこちらを使うようにした(画面表示用の
+    `fetchIncidentsSortedDesc()`とは役割を分離)。
+  - **ログイン画面の未使用チェックボックスの削除:** `LoginPage.jsx`に「ログイン状態を
+    保持する」チェックボックスが残っていたが、`App.jsx`側は既に「ページを再読み込みすると
+    必ずログイン画面に戻る」設計(ログイン状態をlocalStorageに保存しない。2026-08-16の
+    「ログイン画面を毎回表示する(自動ログインを行わない)仕様への変更」参照)になっており、
+    このチェックボックスは実際には何の効果も持たない状態(見た目だけが残る不整合)だった
+    ため削除した。あわせて、本ドキュメントのStep 1の表がこの2026-08-16の変更を反映できて
+    おらず「起動時に既存Cognitoセッションがあれば自動ログインする」という現状と異なる説明の
+    ままだったため、下記「Step 1」の表を実際の挙動(自動ログインはしない・毎回ログイン画面
+    から始まる)に合わせて修正した。
+
+---
+
+2026-08-17にこのAIが反映した変更の概要(詳細は下記「更新」欄に追記していく想定です):
 
 - **仕様書との整合性確認(お客様依頼)で見つかった2件の実装漏れを修正。**
   「仕様書と仕様変更を確認して今現状あっているかどうか＋修正箇所がないか調べてほしい」との
@@ -304,9 +355,9 @@ JSONの形。`client/src/historyApi.js`(履歴API用)と `client/src/iotClient.j
 
 | 仕様書の用語 | 対応するファイル | 状態 |
 |---|---|---|
-| ログイン画面(メール/パスワード) | `client/src/components/LoginPage.jsx` | 実装済み。`client/.env`にCognitoの値が設定されていれば`aws-amplify`の`signIn`で実際のUser Poolに認証する。未設定時は従来通りのモック認証(常に成功)にフォールバック |
-| ルーティング保護・未ログイン時のリダイレクト | `client/src/App.jsx` (`Root`コンポーネント) | 実装済み。起動時に`getCurrentUser()`で既存Cognitoセッションの有無を確認し、有効なら自動ログインする |
-| セッション維持(トークン保存) | Amplify自体が管理(`aws-amplify`が内部でlocalStorageにトークンを保存)。`client/src/App.jsx`はUI表示用の付随フラグのみ管理 | 実装済み(実際のCognitoログイン時はAmplify標準のトークン管理に委ねる) |
+| ログイン画面(メール/パスワード) | `client/src/components/auth/LoginPage.jsx` | 実装済み。`client/.env`にCognitoの値が設定されていれば`aws-amplify`の`signIn`で実際のUser Poolに認証する。未設定時は従来通りのモック認証(常に成功)にフォールバック |
+| ルーティング保護・未ログイン時のリダイレクト | `client/src/App.jsx` (`Root`コンポーネント) | 実装済み。**2026-08-16に「ログイン画面を毎回表示する(自動ログインを行わない)仕様」へ変更済み**。認証状態はReactのstateのみで管理し、localStorageには保存しないため、ページの再読み込みや新しいタブでの起動では必ず未ログイン状態からログイン画面が表示される。あわせて、ログイン画面表示時にAmplify側に残っている可能性のある古いCognitoセッションも明示的に破棄する(`signOut()`)。2026-08-18に、この仕様に合わなくなっていた`LoginPage.jsx`の「ログイン状態を保持する」チェックボックス(実際には何の効果も持たない状態だった)を削除し、実装と表示を一致させた |
+| セッション維持(トークン保存) | Amplify自体が管理(`aws-amplify`が内部でlocalStorageにトークンを保存) | 実装済み(実際のCognitoログイン時、Amplify内部のトークン管理自体はAmplify標準に委ねる。ただし上記の通り、このアプリ側はその永続化を利用せず、画面を開き直すたびに再ログインを求める) |
 | Amplify Auth / Identity Poolからの一時クレデンシャル取得 | `client/src/amplifyConfig.js`(設定)、`client/src/authToken.js`・`client/src/iotClient.js`(取得・利用) | 実装済み |
 | APIへの`Authorization`ヘッダ付与 | `client/src/historyApi.js`(`getIdToken()`でIDトークンを取得し`Authorization: Bearer`を付与) | 実装済み |
 | パスワードの取り扱い | (該当ファイル無し・意図的) | ログインフォームで人が都度入力するのみで、`client/.env`・ソースコード・ドキュメントのどこにも保存していない |
@@ -344,11 +395,12 @@ JSONの形。`client/src/historyApi.js`(履歴API用)と `client/src/iotClient.j
 
 | 仕様書の用語 | 対応するファイル | 状態 |
 |---|---|---|
-| 履歴API(JWTトークン付き)からのデータ取得 | `client/src/historyApi.js`(取得・JWT付与・レスポンス正規化)、`client/src/incidentHistory.js`(フォールバック用サンプルデータ) | 実装済み。`VITE_HISTORY_API_URL`が設定されていれば実APIから取得し、未設定/通信エラー/レスポンス形式不一致の場合は自動的にサンプルデータへフォールバックする(画面上部にどちらを表示中か案内表示あり)。**レスポンスの解釈は上記「システム共通JSONスキーマ」に厳密準拠(device_id/room_id/timestamp/event_type/details)に更新済み**(以前は実際のフィールド名が不明だったため複数候補を試す寛容な実装だったが、仕様書で確定したため正確なパーサーに置き換えた) |
-| 危険行為の種類ごとの絞り込み | `client/src/incidentHistory.js`(`CATEGORIES`/`GROUPS`)、`client/src/components/HistoryPage.jsx` | 実装済み。仕様書のhazard_type/sensor_type/alert_type(fall/prone/intrusion/door_open/night_wandering)をカテゴリとして追加。加えて、このアプリ独自のzone_*(エリアごとのクライアント側判定)・ingestion(誤飲、仕様書に無いデモ専用)も引き続き選択可能 |
-| 「家具・エリアの設定」タブのエリアごとの絞り込み | `client/src/components/HistoryPage.jsx`(`zoneIdForIncident()`) | 実装済み(独自機能。座標(x, z)がどのエリアの矩形内かで動的に絞り込む。エリアを追加すれば選択肢も自動的に増える) |
-| ヒートマップ/パーティクル生成 | `client/src/components/HistoryPage.jsx` | 実装済み(間取り図上のSVGヒートマップ。3D空間内のパーティクルではない)。床座標が不明(概算)な項目は密度計算から除外し、点線の輪付きマーカーとして個別表示のみ行う |
-| `InstancedMesh`によるGPU側一括描画 | (未対応) | ⏳ 現状はデータ件数が少ないSVG実装のため未着手。実データ規模が判明し3D空間上に描画する方式に変更する際に対応 |
+| 履歴API(JWTトークン付き)からのデータ取得 | `client/src/historyApi.js`(取得・JWT付与・レスポンス正規化)、`client/src/incidentHistory.js`(デモ用データ) | 実装済み。**モードによって挙動が異なる(2026-08-18更新)**。本番環境モードでは`VITE_HISTORY_API_URL`へ必ず実際に問い合わせ、取得に失敗しても(未設定・通信エラー・タイムアウト・レスポンス形式不一致いずれも)サンプルデータへは自動フォールバックせず、`source: 'error'`として画面に明確に「取得できませんでした」と表示する。デモ用データモードでは、`VITE_HISTORY_API_URL`の設定有無に関わらず実データへは一切通信せず、常に`incidentHistory.js`のデータ(この端末のブラウザで自由に編集可能。下記参照)を表示する。**レスポンスの解釈は「システム共通JSONスキーマ」に厳密準拠(device_id/room_id/timestamp/event_type/details)** |
+| デモ用データの編集(追加・変更・削除) | `client/src/incidentHistory.js`(`addIncident()`/`updateIncident()`/`removeIncident()`/`resetIncidents()`、localStorage保存)、`client/src/components/history/IncidentDataEditorPage.jsx` | 実装済み(独自機能。仕様書に明記は無いが、お客様要望により追加)。デモ用データモードのとき、ハンバーガーメニューの「管理画面」タブ→「危険行為履歴データの編集」から、危険行為履歴(AIリスクサジェスト「普段行かない場所へのアクセス」を含む全カテゴリ)を間取り図上のクリック/ドラッグや一覧の入力欄から自由に追加・編集・削除できる。本番環境モードではメニューから隠れ、ページ自体も編集不可の案内表示になる |
+| 危険行為の種類ごとの絞り込み | `client/src/incidentHistory.js`(`CATEGORIES`/`GROUPS`)、`client/src/components/history/HistoryPage.jsx` | 実装済み。仕様書のhazard_type/sensor_type/alert_type/risk_suggestion(fall/prone/intrusion/door_open/night_wandering/risk_suggestion)をカテゴリとして追加。加えて、このアプリ独自のzone_*(エリアごとのクライアント側判定)・ingestion(誤飲、仕様書に無いデモ専用)も引き続き選択可能 |
+| 「家具・エリアの設定」タブのエリアごとの絞り込み | `client/src/components/history/HistoryPage.jsx`(`zoneIdForIncident()`) | 実装済み(独自機能。座標(x, z)がどのエリアの矩形内かで動的に絞り込む。エリアを追加すれば選択肢も自動的に増える) |
+| ヒートマップ/パーティクル生成 | `client/src/components/history/HistoryPage.jsx` | 実装済み(間取り図上のSVGヒートマップ。3D空間内のパーティクルではない)。床座標が不明(概算)な項目は密度計算から除外し、点線の輪付きマーカーとして個別表示のみ行う |
+| `InstancedMesh`によるGPU側一括描画 | `client/src/components/history/IncidentBarChart3D.jsx`(`InstancedBars`) | 実装済み(3D棒グラフ表示のみ。SVGヒートマップ側は対象外)。単位立方体1つの`<instancedMesh>`に対し`setMatrixAt`/`setColorAt`でインスタンスごとに書き込み、1回のドローコールで全ての棒を描画する |
 
 ## Step 6: プロダクションビルドとデプロイ
 
@@ -378,13 +430,13 @@ Role A・Role Bからの追加情報を受領し次第、本番構成へ置き�
 ## 補足: 接続状況の可視化(診断ページ)
 
 仕様書には無い、運用・デバッグ用にこのAIが追加した独自ページです。ハンバーガーメニューの
-「接続状況」から開けます(`client/src/components/ConnectionStatusPage.jsx`)。
+「接続状況」から開けます(`client/src/components/connection-status/ConnectionStatusPage.jsx`)。
 
 | セクション | 確認方法 |
 |---|---|
 | ① AWS Cognito | ページ表示時に自動で`fetchAuthSession()`を呼び、有効なIDトークンを取得できるか確認 |
 | ② AWS IoT Core | 手動の「接続テストを実行」ボタン。実際にMQTT over WebSocketで接続を試みる(最大10秒待機)。自動実行にしていない理由は、一時クレデンシャルの取得や接続確立に時間がかかりうるため |
-| ③ 履歴API | ページ表示時に自動で`fetchIncidentsSortedDesc()`を呼び、実データ('api')かサンプルデータへのフォールバック('mock')かを確認 |
+| ③ 履歴API | ページ表示時に自動で`historyApi.js`の`checkHistoryApiConnectivity()`を呼び、実際のAWS履歴APIに接続できるか('api')・できないか('error')を確認する。**2026-08-18更新:** デモ用データモードでは画面表示用の`fetchIncidentsSortedDesc()`が実データへ一切通信しなくなった(下記Step 5参照)ため、このページの診断だけは現在のモードに関わらず常に実データへの疎通を試みる専用関数に分離した(診断結果は画面表示内容とは独立) |
 | ④ S3 | ブラウザから書き込み状況を直接確認する手段が無いため、設定値(バケット名・リージョン)の表示のみ |
 | ⑤ 検出パイプライン | `useDetectionPipeline()`の状態(Webカメラ・見守りサーバーとの接続)をそのまま表示 |
 

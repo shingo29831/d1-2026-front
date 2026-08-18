@@ -144,6 +144,13 @@ export const DEFAULT_INCIDENT_HISTORY = [
 
   // 夜間徘徊(仕様書alert_type: "night_wandering"。ドア開閉+照度の複合アラート)
   { id: 'inc032', type: 'night_wandering', category: 'night_wandering', severity: 'danger', label: '夜間徘徊の疑いを検知(玄関ドアの開閉+低照度)', x: -2.00, z: 0.30, time: '2026-08-06T02:14:00+09:00' },
+
+  // AIリスクサジェスト(仕様書event_type: "risk_suggestion"、details.reason:
+  // "unusual_access_time" = 「普段行かない場所へのアクセス」)。実データでは
+  // historyApi.jsがAPIレスポンスから生成するが、デモ用データでもこの画面から
+  // 追加・編集・削除できることを示すため、既定サンプルとして数件入れている。
+  { id: 'inc033', type: 'risk_suggestion', category: 'risk_suggestion', severity: 'danger', label: '潜在的リスク: 普段行かない場所へのアクセス(2階物置)', x: -3.40, z: -2.10, time: '2026-08-07T22:40:00+09:00' },
+  { id: 'inc034', type: 'risk_suggestion', category: 'risk_suggestion', severity: 'warning', label: '潜在的リスク: 普段行かない場所へのアクセス(ベランダ側窓)', x: 3.60, z: -1.30, time: '2026-08-05T05:12:00+09:00' },
 ];
 
 // ===================================================================

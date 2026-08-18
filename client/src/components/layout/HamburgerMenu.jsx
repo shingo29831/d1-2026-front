@@ -15,10 +15,13 @@ import { useOperationMode } from '../../operationModeContext';
 const PAGES = [
   { id: 'dashboard', label: '見守りダッシュボード', desc: '3Dルームでの見守りモニター', group: 'user' },
   { id: 'history', label: '危険行為の履歴', desc: '転倒・危険エリアへの接近の履歴とヒートマップ', group: 'user' },
-  // 【重要】このページはデモ用データモード専用(demoOnly: true)。本番環境モードでは
-  // 危険行為の履歴をAWSからの実データのみで扱うべきのため、メニュー自体から隠す
+  // 【重要】データの編集(追加・変更・削除)は利用者画面ではなく管理画面側に
+  // 置いてほしい、利用者画面はこれまで通りにしてほしい、というご要望を受けて
+  // group: 'admin' にしている(以前は 'user' だった)。また、このページは
+  // デモ用データモード専用(demoOnly: true)。本番環境モードでは危険行為の履歴を
+  // AWSからの実データのみで扱うべきのため、メニュー自体から隠す
   // (renderDrawerContents()内のvisiblePagesの絞り込みでisProductionを見ている)。
-  { id: 'historyDataEdit', label: '危険行為履歴データの編集', desc: 'デモ用データ(AIリスクサジェスト含む)を追加・編集・削除', group: 'user', demoOnly: true },
+  { id: 'historyDataEdit', label: '危険行為履歴データの編集', desc: 'デモ用データ(AIリスクサジェスト「普段行かない場所へのアクセス」含む)を追加・編集・削除', group: 'admin', demoOnly: true },
   { id: 'roomSetup', label: '部屋の設定', desc: '形とサイズを入力、またはGLTF/GLBを読み込んで部屋を作成', group: 'user' },
   { id: 'cameraSetup', label: 'カメラ位置の設定', desc: '間取り図でカメラの設置位置・向き・視野角を決める', group: 'user' },
   { id: 'furnitureSetup', label: '家具の設定', desc: '家具(箱)を自由に配置', group: 'user' },
