@@ -121,8 +121,8 @@ export default function HamburgerMenu({ currentPage, onNavigate, connected, embe
             ・本番: 仕様書(Role A/Role C)通り、カメラ映像の取得・AI推論はエッジ
               (EC2)側が行い、このフロントエンドはWebカメラを一切使用せず、AWS IoT
               CoreからのMQTT受信のみで動作する「閲覧専用」になる。
-            ※本番ビルド(PROD)時は常に本番環境モードとして動作するため、切り替えボタンは表示しない。 */}
-        {!import.meta.env.PROD && (
+            ※本番ビルド時は常に本番環境モードとして動作するため、切り替えボタンは表示しない。 */}
+        {import.meta.env.DEV && (
           <button
             onClick={toggleOperationMode}
             style={{ ...styles.themeToggle, ...(isProduction ? styles.modeToggleActive : {}) }}

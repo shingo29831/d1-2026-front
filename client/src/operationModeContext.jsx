@@ -21,7 +21,7 @@ const STORAGE_KEY = 'system1.operationMode.v1';
 const OperationModeContext = createContext(null);
 
 function loadSaved() {
-  if (import.meta.env.PROD) return 'production';
+  if (!import.meta.env.DEV) return 'production';
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     return raw === 'demo' || raw === 'production' ? raw : null;
@@ -35,12 +35,12 @@ export function OperationModeProvider({ children }) {
   // localStorageに保存され、次回起動時もその選択が復元される。
   // 本番ビルド時は強制的に本番環境モード(production)に固定する。
   const [mode, setMode] = useState(() => {
-    if (import.meta.env.PROD) return 'production';
+    if (!import.meta.env.DEV) return 'production';
     return loadSaved() || 'demo';
   });
 
   useEffect(() => {
-    if (import.meta.env.PROD) return;
+    if (!import.meta.env.DEV) return;
     try {
       window.localStorage.setItem(STORAGE_KEY, mode);
     } catch {
@@ -49,7 +49,7 @@ export function OperationModeProvider({ children }) {
   }, [mode]);
 
   const toggleOperationMode = useCallback(() => {
-    if (import.meta.env.PROD) return;
+    if (!import.meta.env.DEV) return;
     setMode((m) => (m === 'demo' ? 'production' : 'demo'));
   }, []);
 
