@@ -312,19 +312,105 @@ export default function MonitoringDashboard({
     // (「部屋の設定」「家具・エリアの設定」タブで変更した直後は反映されないバグ)。
   }, [selectedDummyId, bounds, zones, pushNotification, flashDummyKey, collisionWalls, furniture]);
 
+  // --------------------------------------------------------------
+  // 速度フィルタリング(外れ値除外)
+  // YOLOやPose推定のノイズで瞬間的に座標が飛ぶ(ワープする)のを防ぐため、
+  // 前回フレームからの移動速度が人間の限界(例: 4m/s)を超える場合は
+  // 異常値として破棄し、前回の座標を維持する。
+  // --------------------------------------------------------------
+  const personHistoryRef = useRef({}); // { [id]: { x, z, time } }
+  const MAX_SPEED_M_PER_SEC = 4.0;
+
   // 見守りシーンに表示する人物一覧(検出された全員分)。主対象(先頭の1人)には
   // 通知と連動した色を、それ以外には控えめな標準色を割り当てる。
   // 【重要】実際のYOLO検出座標(p.floor)そのものは書き換えず、resolveSafePosition()で
   // 「表示位置だけ」を家具・壁にめり込まないよう僅かに押し出す(危険エリア判定などは
   // 元の座標(primaryPerson/useMonitoringAlerts側)のまま使われるため、判定結果には影響しない)。
-  const people = isLost
-    ? []
-    : allPersons.map((p, idx) => ({
+  const people = useMemo(() => {
+    if (isLost) {
+      personHistoryRef.current = {};
+      return [];
+    }
+
+    const currentHistory = personHistoryRef.current;
+    const nextHistory = {};
+    const time = lastPoseAt || Date.now();
+
+    const result = allPersons.map((p, idx) => {
+      const id = p.id !== undefined ? p.id : idx;
+      let { x, z } = p.floor;
+      let isCloseUp = false;
+
+      // --- 至近距離（ドアップ）判定 ---
+      // 顔面が画面の上半分にあり、かつ肩や胴体が見えない場合はカメラの真ん前にいるとみなす
+      if (poseData && poseData[idx] && poseData[idx].keypoints) {
+        const kpts = poseData[idx].keypoints;
+        const getKpt = (i) => {
+          const k = kpts[i];
+          if (!k) return null;
+          if (Array.isArray(k)) return { x: k[0], y: k[1], conf: k[2] };
+          return k;
+        };
+
+        // 0:nose, 1:l_eye, 2:r_eye, 3:l_ear, 4:r_ear
+        const faceKpts = [getKpt(0), getKpt(1), getKpt(2), getKpt(3), getKpt(4)].filter(k => k && k.conf > 0.5);
+        // 5:l_shoulder, 6:r_shoulder, 11:l_hip, 12:r_hip
+        const bodyKpts = [getKpt(5), getKpt(6), getKpt(11), getKpt(12)].filter(k => k && k.conf > 0.5);
+
+        if (faceKpts.length > 0 && bodyKpts.length === 0) {
+          const avgFaceY = faceKpts.reduce((sum, k) => sum + k.y, 0) / faceKpts.length;
+          // 正規化座標(0〜1)なら0.5未満、ピクセル座標なら一般的な解像度の半分(例: 360)未満を「上半分」とみなす
+          const isUpperHalf = avgFaceY < 0.5 || (avgFaceY > 1.0 && avgFaceY < 360);
+
+          if (isUpperHalf) {
+            isCloseUp = true;
+            if (cameraMount) {
+              const yawRad = (cameraYawDeg || 0) * (Math.PI / 180);
+              const dist = 0.5; // カメラの0.5m前
+              x = cameraMount.x + dist * Math.sin(yawRad);
+              z = cameraMount.z - dist * Math.cos(yawRad);
+            }
+          }
+        }
+      }
+      // ------------------------------
+
+      const prev = currentHistory[id];
+      if (prev) {
+        const dt = (time - prev.time) / 1000;
+        if (dt > 0) {
+          const dx = x - prev.x;
+          const dz = z - prev.z;
+          const dist = Math.sqrt(dx * dx + dz * dz);
+          const speed = dist / dt;
+
+          // ドアップ判定時は速度フィルタリングをバイパスして即座に反映させる
+          // （誤検出から復帰した際にワープとして弾かれないようにするため）
+          if (speed > MAX_SPEED_M_PER_SEC && !isCloseUp) {
+            // 異常値として破棄し、前回の座標を維持
+            x = prev.x;
+            z = prev.z;
+          }
+        } else if (dt === 0) {
+          // 同一フレーム(再レンダリング)の場合は前回の計算結果をそのまま使う
+          x = prev.x;
+          z = prev.z;
+        }
+      }
+
+      nextHistory[id] = { x, z, time };
+
+      return {
         id: idx,
-        floor: resolveSafePosition(p.floor, { walls: collisionWalls, furniture }),
+        floor: resolveSafePosition({ x, z }, { walls: collisionWalls, furniture }),
         fallen: p.aspectRatio < THRESHOLDS.FALL_ASPECT_RATIO,
         colorState: idx === 0 ? colorState : 'normal',
-      }));
+      };
+    });
+
+    personHistoryRef.current = nextHistory;
+    return result;
+  }, [allPersons, isLost, lastPoseAt, collisionWalls, furniture, colorState, poseData, cameraMount, cameraYawDeg]);
 
   // ダミー人物も見守りシーンに重ねて表示する(実検出とは紫色で見分けられる)。
   // クリックすると、そのダミーを矢印キーでの移動対象として選択できる。
