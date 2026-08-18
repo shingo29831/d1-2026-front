@@ -50,17 +50,30 @@ export function analyzePerson(keypoints, roomConfig) {
   const rEye = isValidKpt(keypoints[2]) ? keypoints[2] : null;
   const lEar = isValidKpt(keypoints[3]) ? keypoints[3] : null;
   const rEar = isValidKpt(keypoints[4]) ? keypoints[4] : null;
-  
-  let faceWidthPx = 0;
-  let actualWidthM = 0;
+  const lShoulder = isValidKpt(keypoints[5]) ? keypoints[5] : null;
+  const rShoulder = isValidKpt(keypoints[6]) ? keypoints[6] : null;
 
-  // 距離推定用：両耳（顔幅）または両目（瞳孔間距離）のピクセル幅を取得
+  const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
+  const tanFovY = Math.tan(((fovDeg / 2) * Math.PI) / 180);
+  const estimates = [];
+
+  // 距離推定用：肩幅、顔幅、両目のピクセル幅からそれぞれ距離を計算し、平均をとることで精度を上げる
+  if (lShoulder && rShoulder) {
+    const px = Math.abs(lShoulder[0] - rShoulder[0]);
+    if (px > 10) estimates.push((0.38 * IMG_H) / (2 * px * tanFovY)); // 肩幅 約38cm
+  }
   if (lEar && rEar) {
-    faceWidthPx = Math.abs(lEar[0] - rEar[0]);
-    actualWidthM = 0.14; // 両耳の距離（顔幅）約14cm
-  } else if (lEye && rEye) {
-    faceWidthPx = Math.abs(lEye[0] - rEye[0]);
-    actualWidthM = 0.065; // 両目の距離（瞳孔間距離）約6.5cm
+    const px = Math.abs(lEar[0] - rEar[0]);
+    if (px > 10) estimates.push((0.14 * IMG_H) / (2 * px * tanFovY)); // 顔幅 約14cm
+  }
+  if (lEye && rEye) {
+    const px = Math.abs(lEye[0] - rEye[0]);
+    if (px > 10) estimates.push((0.065 * IMG_H) / (2 * px * tanFovY)); // 両目 約6.5cm
+  }
+
+  let estimatedDistanceM = null;
+  if (estimates.length > 0) {
+    estimatedDistanceM = estimates.reduce((a, b) => a + b, 0) / estimates.length;
   }
 
   // ドアップ判定用の顔幅（互換性維持のため目を優先）
@@ -89,15 +102,6 @@ export function analyzePerson(keypoints, roomConfig) {
   // 11: L Hip, 12: R Hip, 13: L Knee, 14: R Knee, 15: L Ankle, 16: R Ankle
   const lowerBodyIndices = [11, 12, 13, 14, 15, 16];
   const hasLowerBody = lowerBodyIndices.some(i => isValidKpt(keypoints[i]));
-
-  // 顔の幅からカメラまでの距離を推定する（足元が見えない場合のフォールバック用）
-  let estimatedDistanceM = null;
-  if (faceWidthPx > 10) {
-    const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
-    const tanFovY = Math.tan(((fovDeg / 2) * Math.PI) / 180);
-    // D = (W_real * IMG_H) / (2 * W_px * tan(fovY / 2))
-    estimatedDistanceM = (actualWidthM * IMG_H) / (2 * faceWidthPx * tanFovY);
-  }
 
   // 【不具合修正】下半身が見えない（顔面アップ等）場合、顔のパーツ配置によって
   // バウンディングボックスが横長になり、誤って「転倒」と判定されるのを防ぐため、
@@ -134,7 +138,11 @@ export function analyzePerson(keypoints, roomConfig) {
     refY = bbox.maxY; // 足が見えない場合は枠の一番下（床に近い部分）を使用
   }
 
-  const useEstimatedDistance = !hasLowerBody || isCloseUp;
+  // 膝か足首が見えていれば、床面へのレイキャストが比較的正確に行える。
+  // 逆に腰までしか見えていない状態でレイキャストすると、実際の立ち位置より遠くにワープしてしまうため、
+  // 足元が不確かな場合は推定距離(estimatedDistanceM)を優先して使う。
+  const hasGoodLowerBody = isValidKpt(ankleL) || isValidKpt(ankleR) || isValidKpt(kneeL) || isValidKpt(kneeR);
+  const useEstimatedDistance = !hasGoodLowerBody || isCloseUp;
 
   return {
     avgConf,
