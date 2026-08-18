@@ -45,6 +45,49 @@ export function analyzePerson(keypoints, roomConfig) {
   const bboxH = Math.max(bbox.maxY - bbox.minY, 1);
   let aspectRatio = bboxH / bboxW; // 小さいほど「横たわっている」
 
+  // --- 至近距離（ドアップ）判定 ---
+  const lEye = isValidKpt(keypoints[1]) ? keypoints[1] : null;
+  const rEye = isValidKpt(keypoints[2]) ? keypoints[2] : null;
+  const lEar = isValidKpt(keypoints[3]) ? keypoints[3] : null;
+  const rEar = isValidKpt(keypoints[4]) ? keypoints[4] : null;
+  
+  let faceWidth = 0;
+  if (lEye && rEye) {
+    faceWidth = Math.abs(lEye[0] - rEye[0]);
+  } else if (lEar && rEar) {
+    faceWidth = Math.abs(lEar[0] - rEar[0]);
+  }
+
+  const faceIndices = [0, 1, 2, 3, 4];
+  const bodyIndices = [5, 6, 11, 12];
+  const faces = faceIndices.map(i => keypoints[i]).filter(isValidKpt);
+  const bodies = bodyIndices.map(i => keypoints[i]).filter(isValidKpt);
+
+  // 両目の距離が80px以上（画面内で顔が大きく映っている）、
+  // または顔は見えているが胴体（肩・腰）が全く見えない場合はドアップとみなす
+  if (faceWidth > 80 || (faces.length > 0 && bodies.length === 0)) {
+    let floor = { x: 0, z: 0 };
+    if (roomConfig && roomConfig.cameraMount) {
+      const yawRad = (roomConfig.cameraYawDeg || 0) * (Math.PI / 180);
+      const dist = 0.5; // カメラの0.5m前
+      floor = {
+        x: roomConfig.cameraMount.x + dist * Math.sin(yawRad),
+        z: roomConfig.cameraMount.z - dist * Math.cos(yawRad)
+      };
+    }
+    return {
+      avgConf,
+      bbox,
+      aspectRatio: Math.max(aspectRatio, 2.0), // 転倒判定されないように安全な比率にする
+      hasLowerBody: false,
+      floor,
+      visibleCount: visible.length,
+      keypoints,
+      isCloseUp: true
+    };
+  }
+  // ------------------------------
+
   // 下半身（腰、膝、足首）が少なくとも1つ見えているかを確認
   // 11: L Hip, 12: R Hip, 13: L Knee, 14: R Knee, 15: L Ankle, 16: R Ankle
   const lowerBodyIndices = [11, 12, 13, 14, 15, 16];
