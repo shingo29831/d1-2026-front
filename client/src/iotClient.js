@@ -22,6 +22,7 @@
 // ===================================================================
 
 import { fetchAuthSession } from 'aws-amplify/auth';
+import { IoTClient, AttachPrincipalPolicyCommand } from '@aws-sdk/client-iot';
 
 const IOT_ENDPOINT = import.meta.env.VITE_IOT_ENDPOINT || '';
 const AWS_REGION = import.meta.env.VITE_AWS_REGION || 'ap-southeast-1';
@@ -123,18 +124,49 @@ async function buildSignedWebSocketUrl({ endpoint, region, accessKeyId, secretAc
 
 // ログイン中ユーザーのCognito Identity Poolクレデンシャルを使って、
 // IoT Core接続用の署名済みWebSocket URLを取得する。
+async function attachIoTPolicy(credentials, identityId) {
+  const iotClient = new IoTClient({
+    region: AWS_REGION,
+    credentials: {
+      accessKeyId: credentials.accessKeyId,
+      secretAccessKey: credentials.secretAccessKey,
+      sessionToken: credentials.sessionToken,
+    },
+  });
+
+  try {
+    const command = new AttachPrincipalPolicyCommand({
+      policyName: 'Cisco_Sin_IoT',
+      principal: identityId,
+    });
+    await iotClient.send(command);
+    console.log('[iotClient] IoT Policy attached successfully to', identityId);
+  } catch (error) {
+    // すでにアタッチされている場合や、IAM権限付与の反映遅延などを考慮し、エラーは握り潰さず警告として出力して続行する
+    console.warn('[iotClient] Failed to attach IoT policy (it might already be attached or IAM permission is missing):', error);
+  }
+}
+
+// ログイン中ユーザーのCognito Identity Poolクレデンシャルを使って、
+// IoT Core接続用の署名済みWebSocket URLを取得する。
 export async function getSignedIotWebSocketUrl() {
   if (!IOT_ENDPOINT) {
     throw new Error('VITE_IOT_ENDPOINT が設定されていません(client/.env を確認してください)');
   }
   const session = await fetchAuthSession();
   const creds = session?.credentials;
-  if (!creds?.accessKeyId || !creds?.secretAccessKey) {
+  const identityId = session?.identityId;
+
+  if (!creds?.accessKeyId || !creds?.secretAccessKey || !identityId) {
     throw new Error(
-      'AWSの一時クレデンシャルを取得できませんでした' +
+      'AWSの一時クレデンシャルまたはIdentity IDを取得できませんでした' +
       '(Cognitoにログイン済みか、Identity Poolが設定されているかご確認ください)',
     );
   }
+
+  // MQTT接続用のURLを生成する前に、自身のIdentity IDにIoTポリシーをアタッチする
+  await attachIoTPolicy(creds, identityId);
+
   return buildSignedWebSocketUrl({
     endpoint: IOT_ENDPOINT,
     region: AWS_REGION,

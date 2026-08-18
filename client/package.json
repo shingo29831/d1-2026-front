@@ -10,6 +10,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@aws-sdk/client-iot": "^3.1112.0",
     "@react-three/drei": "^9.99.0",
     "@react-three/fiber": "^8.15.16",
     "aws-amplify": "^6.20.0",
