@@ -45,17 +45,30 @@ export function analyzePerson(keypoints, roomConfig) {
   const bboxH = Math.max(bbox.maxY - bbox.minY, 1);
   let aspectRatio = bboxH / bboxW; // 小さいほど「横たわっている」
 
-  // --- 至近距離（ドアップ）判定 ---
+  // --- 至近距離（ドアップ）判定と距離推定 ---
   const lEye = isValidKpt(keypoints[1]) ? keypoints[1] : null;
   const rEye = isValidKpt(keypoints[2]) ? keypoints[2] : null;
   const lEar = isValidKpt(keypoints[3]) ? keypoints[3] : null;
   const rEar = isValidKpt(keypoints[4]) ? keypoints[4] : null;
   
-  let faceWidth = 0;
+  let faceWidthPx = 0;
+  let actualWidthM = 0;
+
+  // 距離推定用：両耳（顔幅）または両目（瞳孔間距離）のピクセル幅を取得
+  if (lEar && rEar) {
+    faceWidthPx = Math.abs(lEar[0] - rEar[0]);
+    actualWidthM = 0.14; // 両耳の距離（顔幅）約14cm
+  } else if (lEye && rEye) {
+    faceWidthPx = Math.abs(lEye[0] - rEye[0]);
+    actualWidthM = 0.065; // 両目の距離（瞳孔間距離）約6.5cm
+  }
+
+  // ドアップ判定用の顔幅（互換性維持のため目を優先）
+  let faceWidthForCloseUp = 0;
   if (lEye && rEye) {
-    faceWidth = Math.abs(lEye[0] - rEye[0]);
+    faceWidthForCloseUp = Math.abs(lEye[0] - rEye[0]);
   } else if (lEar && rEar) {
-    faceWidth = Math.abs(lEar[0] - rEar[0]);
+    faceWidthForCloseUp = Math.abs(lEar[0] - rEar[0]);
   }
 
   const faceIndices = [0, 1, 2, 3, 4];
@@ -66,7 +79,7 @@ export function analyzePerson(keypoints, roomConfig) {
   // 両目の距離が80px以上（画面内で顔が大きく映っている）、
   // 顔は見えているが胴体（肩・腰）が全く見えない、
   // または検出されたキーポイントのバウンディングボックスが画面の大部分を占める場合はドアップとみなす
-  const isCloseUp = faceWidth > 80 || 
+  const isCloseUp = faceWidthForCloseUp > 80 || 
                     (faces.length > 0 && bodies.length === 0) ||
                     (bboxW > IMG_W * 0.6) || 
                     (bboxH > IMG_H * 0.8);
@@ -76,6 +89,15 @@ export function analyzePerson(keypoints, roomConfig) {
   // 11: L Hip, 12: R Hip, 13: L Knee, 14: R Knee, 15: L Ankle, 16: R Ankle
   const lowerBodyIndices = [11, 12, 13, 14, 15, 16];
   const hasLowerBody = lowerBodyIndices.some(i => isValidKpt(keypoints[i]));
+
+  // 顔の幅からカメラまでの距離を推定する（足元が見えない場合のフォールバック用）
+  let estimatedDistanceM = null;
+  if (faceWidthPx > 10) {
+    const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
+    const tanFovY = Math.tan(((fovDeg / 2) * Math.PI) / 180);
+    // D = (W_real * IMG_H) / (2 * W_px * tan(fovY / 2))
+    estimatedDistanceM = (actualWidthM * IMG_H) / (2 * faceWidthPx * tanFovY);
+  }
 
   // 【不具合修正】下半身が見えない（顔面アップ等）場合、顔のパーツ配置によって
   // バウンディングボックスが横長になり、誤って「転倒」と判定されるのを防ぐため、
@@ -112,13 +134,15 @@ export function analyzePerson(keypoints, roomConfig) {
     refY = bbox.maxY; // 足が見えない場合は枠の一番下（床に近い部分）を使用
   }
 
+  const useEstimatedDistance = !hasLowerBody || isCloseUp;
+
   return {
     avgConf,
     bbox,
     aspectRatio,
     hasLowerBody: isCloseUp ? false : hasLowerBody,
     // 足元を基準にしているため、投影先の高さオフセット(targetY)は0(床面)のままでよい
-    floor: imageToFloor(refX, refY, roomConfig, 0, isCloseUp),
+    floor: imageToFloor(refX, refY, roomConfig, 0, isCloseUp, useEstimatedDistance ? estimatedDistanceM : null),
     visibleCount: visible.length,
     keypoints,
     isCloseUp,
@@ -142,7 +166,7 @@ export function analyzePerson(keypoints, roomConfig) {
 // しまう誤差がありました。targetYを指定することで、床面ではなく「人物の中心の高さ」
 // の仮想平面との交点を計算し、奥行きのズレを解消します。
 // -------------------------------------------------------------------
-export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = false) {
+export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = false, estimatedDistanceM = null) {
   const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
   const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
@@ -238,13 +262,20 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
 
   // 指定平面(Y=targetY)への投影で求めた距離(レイがほぼ水平・上向きで交差しない
   // 場合は上限距離をそのまま採用する)。
-  // 【不具合修正】ドアップ(isCloseUp)の場合、参照座標(refY)が足元ではなく顔や胸になるため、
+  // 【不具合修正】足元が見えない場合やドアップの場合、参照座標(refY)が足元ではなく顔や胸になり、
   // そのレイを床面(Y=0)まで延長すると数メートル先の遠方に誤投影されてしまう。
-  // そのため、至近距離と判定された場合やレイが水平以上(dir.y >= -1e-4)の場合は
-  // カメラの足元付近(0.5m)に固定する。
-  const floorDistanceM = (isCloseUp || dir.y >= -1e-4)
-    ? 0.5
-    : Math.min(-(cameraMount.y - targetY) / dir.y, MAX_RAY_DISTANCE_M);
+  // そのため、顔の幅から推定した距離(estimatedDistanceM)がある場合はそれを優先し、
+  // 無い場合はカメラの足元付近(0.5m)に固定する。
+  let floorDistanceM;
+  if (estimatedDistanceM !== null) {
+    // estimatedDistanceM はカメラのローカルZ(前方)方向の距離。
+    // レイの方向(dir)に沿った実際の距離に変換するには dirLen を掛ける。
+    floorDistanceM = estimatedDistanceM * dirLen;
+  } else if (isCloseUp || dir.y >= -1e-4) {
+    floorDistanceM = 0.5;
+  } else {
+    floorDistanceM = Math.min(-(cameraMount.y - targetY) / dir.y, MAX_RAY_DISTANCE_M);
+  }
 
   const distanceM = floorDistanceM;
 
