@@ -52,6 +52,8 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   const rEar = isValidKpt(keypoints[4]) ? keypoints[4] : null;
   const lShoulder = isValidKpt(keypoints[5]) ? keypoints[5] : null;
   const rShoulder = isValidKpt(keypoints[6]) ? keypoints[6] : null;
+  const lHip = isValidKpt(keypoints[11]) ? keypoints[11] : null;
+  const rHip = isValidKpt(keypoints[12]) ? keypoints[12] : null;
 
   const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
   const tanFovY = Math.tan(((fovDeg / 2) * Math.PI) / 180);
@@ -77,6 +79,7 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   // 過去のフレームで足元が見えていた時に逆算して学習した個人サイズがあればそれを使い、
   // なければ一般的な成人の固定値を使う。
   const learnedShoulderW = previousState?.learnedShoulderW ?? 0.38;
+  const learnedHipW = previousState?.learnedHipW ?? 0.30;
   const learnedFaceW = previousState?.learnedFaceW ?? 0.14;
   const learnedEyeW = previousState?.learnedEyeW ?? 0.065;
   const learnedHeight = previousState?.learnedHeight ?? 1.6;
@@ -90,6 +93,10 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
     const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
     if (px > 10) estimates.push((learnedShoulderW * IMG_H) / (2 * px * tanFovY));
+  }
+  if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
+    const px = Math.abs(lHip[0] - rHip[0]) / horizontalCompression;
+    if (px > 10) estimates.push((learnedHipW * IMG_H) / (2 * px * tanFovY));
   }
   if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
     const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
@@ -245,6 +252,13 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
         if (w > 0.2 && w < 0.6) nextState.learnedShoulderW = learnedShoulderW * (1 - alpha) + w * alpha;
       }
     }
+    if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
+      const px = Math.abs(lHip[0] - rHip[0]) / horizontalCompression;
+      if (px > 10) {
+        const w = calcReal(px);
+        if (w > 0.15 && w < 0.5) nextState.learnedHipW = learnedHipW * (1 - alpha) + w * alpha;
+      }
+    }
     if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
       const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
       if (px > 10) {
@@ -274,7 +288,12 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
       const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
       if (px > 10) referenceDistance = (learnedShoulderW * IMG_H) / (2 * px * tanFovY);
     } 
-    // 肩が見えなければ顔幅を基準にする
+    // 肩が見えなければ腰幅を基準にする
+    else if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
+      const px = Math.abs(lHip[0] - rHip[0]) / horizontalCompression;
+      if (px > 10) referenceDistance = (learnedHipW * IMG_H) / (2 * px * tanFovY);
+    }
+    // 腰も見えなければ顔幅を基準にする
     else if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
       const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
       if (px > 10) referenceDistance = (learnedFaceW * IMG_H) / (2 * px * tanFovY);
@@ -284,8 +303,32 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
       // 基準距離から他のパーツの実際のサイズを逆算（ここでは1.2倍補正は不要）
       const calcReal = (px) => (2 * px * tanFovY * referenceDistance) / IMG_H;
 
-      // 肩幅が基準の場合、顔と目を学習
+      // 肩幅が基準の場合、腰と顔と目を学習
       if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
+        if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
+          const px = Math.abs(lHip[0] - rHip[0]) / horizontalCompression;
+          if (px > 10) {
+            const w = calcReal(px);
+            if (w > 0.15 && w < 0.5) nextState.learnedHipW = learnedHipW * (1 - alpha) + w * alpha;
+          }
+        }
+        if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
+          const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
+          if (px > 10) {
+            const w = calcReal(px);
+            if (w > 0.08 && w < 0.25) nextState.learnedFaceW = learnedFaceW * (1 - alpha) + w * alpha;
+          }
+        }
+        if (lEye && rEye && isInside(lEye) && isInside(rEye)) {
+          const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
+          if (px > 10) {
+            const w = calcReal(px);
+            if (w > 0.04 && w < 0.12) nextState.learnedEyeW = learnedEyeW * (1 - alpha) + w * alpha;
+          }
+        }
+      }
+      // 腰幅が基準の場合、顔と目を学習
+      else if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
         if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
           const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
           if (px > 10) {
@@ -327,6 +370,10 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
     const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
     nextState.maxShoulderPx = Math.max(nextState.maxShoulderPx || 0, px);
+  }
+  if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
+    const px = Math.abs(lHip[0] - rHip[0]) / horizontalCompression;
+    nextState.maxHipPx = Math.max(nextState.maxHipPx || 0, px);
   }
 
   // --- 時間的な平滑化（α-βフィルタ：速度を考慮した予測型トラッキング） ---
