@@ -62,35 +62,39 @@ export default function StatusBar({
       </div>
 
       <div style={s.right}>
-        <CameraControls
-          inputMode={inputMode}
-          requestWebcam={requestWebcam}
-          shouldCapture={shouldCapture}
-          cameraError={cameraError}
-        />
-        <span style={s.rightSep} />
-        <button
-          onClick={onAddDummy}
-          style={s.toggleBtn}
-          title="人物を模したダミーを部屋の中央付近に置きます。クリックして選択後、矢印キーで移動、数字キー(1〜9)で転倒・誤飲・危険エリアへの接近などの危険行為を模擬発生できます。"
-        >
-          🧍 ダミーを置く
-        </button>
-        {dummyCount > 0 && (
+        {import.meta.env.DEV && (
           <>
-            <span style={s.countChip}>
-              <span style={{ ...s.countDot, background: theme.accent }} />
-              ダミー: {dummyCount}体(矢印キーで移動)
-            </span>
-            <span style={s.keyHelpChip} title={dummyKeyHelp}>
-              ⌨ 1〜9キーで危険行為を模擬
-            </span>
-            <button onClick={onClearDummies} style={s.toggleBtn} title="配置したダミーをすべて削除します">
-              ダミーを削除
+            <CameraControls
+              inputMode={inputMode}
+              requestWebcam={requestWebcam}
+              shouldCapture={shouldCapture}
+              cameraError={cameraError}
+            />
+            <span style={s.rightSep} />
+            <button
+              onClick={onAddDummy}
+              style={s.toggleBtn}
+              title="人物を模したダミーを部屋の中央付近に置きます。クリックして選択後、矢印キーで移動、数字キー(1〜9)で転倒・誤飲・危険エリアへの接近などの危険行為を模擬発生できます。"
+            >
+              🧍 ダミーを置く
             </button>
+            {dummyCount > 0 && (
+              <>
+                <span style={s.countChip}>
+                  <span style={{ ...s.countDot, background: theme.accent }} />
+                  ダミー: {dummyCount}体(矢印キーで移動)
+                </span>
+                <span style={s.keyHelpChip} title={dummyKeyHelp}>
+                  ⌨ 1〜9キーで危険行為を模擬
+                </span>
+                <button onClick={onClearDummies} style={s.toggleBtn} title="配置したダミーをすべて削除します">
+                  ダミーを削除
+                </button>
+              </>
+            )}
+            <span style={s.rightSep} />
           </>
         )}
-        <span style={s.rightSep} />
         <button
           onClick={() => onViewModeChange('overview')}
           style={{ ...s.toggleBtn, ...(viewMode === 'overview' ? s.toggleBtnActive : {}) }}
