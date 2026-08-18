@@ -19,18 +19,6 @@ const io = new Server(server, {
 const python = spawn('python', ['pose_estimation.py'], { shell: true });
 
 // --- YOLO推論のバックプレッシャー制御 ---
-// 以前はクライアントから届いた video-frame をすべて無条件でPythonへ書き込んで
-// いたため、Pythonの推論(1フレームあたり)がクライアントの送信間隔(約100ms)
-// より遅い場合、pythonのstdinにフレームがどんどん溜まっていき、見た目の
-// 反映が実際の映像からどんどん遅れていく(=「データを反映させるのが少し遅い」)
-// 現象が起きていた。
-//
-// 対策として「今処理中(busy)かどうか」を管理し、処理中に届いたフレームは
-// 古いものを破棄して常に最新の1枚(latestFrame)だけを保持する。Pythonが
-// 処理を終えて結果を返してきたタイミングで、その時点の最新フレームを
-// 次の処理に回す。これにより、常に「今の状況に一番近い」フレームだけが
-// 処理され、遅延が際限なく蓄積することがなくなる(=古いフレームは処理せず
-// 読み飛ばす)。
 let busy = false;
 let latestFrame = null;
 
@@ -48,10 +36,6 @@ function maybeSendNext() {
   }
 }
 
-// Pythonのstdoutは「1回のdataイベント = 1行のJSON」とは限らない(複数行が
-// つながって届いたり、1行が複数のdataイベントに分割されて届いたりする)。
-// 行単位でバッファリングし、改行で区切られた完全な行だけをJSON.parseする
-// ことで、以前あった「結果がまれに無言でロストする」問題を修正している。
 let stdoutBuffer = '';
 python.stdout.on('data', (data) => {
   stdoutBuffer += data.toString();
@@ -63,6 +47,8 @@ python.stdout.on('data', (data) => {
     if (!trimmed) continue;
     try {
       const json = JSON.parse(trimmed);
+      // Web上のコンソール出力と合わせるため、サーバー側でも本番形式のログを出力
+      console.log(`[Local Server] メッセージ送信 [child_monitoring/${json.event_type}]:`, JSON.stringify(json));
       io.emit('pose-data', json);
     } catch (e) {
       // 解析できない行は無視(ログ行など)
