@@ -243,6 +243,7 @@ export function useDetectionPipeline() {
     const handleConnect = () => setSocketConnected(true);
     const handleDisconnect = () => setSocketConnected(false);
     const handlePoseData = (data) => {
+      console.log('[useDetectionPipeline] Socket.IOからpose-dataを受信しました:', data);
       setPoseData(data);
       setLastPoseAt(Date.now());
     };
