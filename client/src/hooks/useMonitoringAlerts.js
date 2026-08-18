@@ -49,6 +49,7 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   const activeZones = useRef(new Set());
   const wasVisible = useRef(false);
   const lostFiredAt = useRef(0);
+  const lastKnownPositionRef = useRef({ x: null, z: null, time: 0 });
 
   // 【重要】poseData/lastPoseAt/connectedは毎フレーム(検出間隔によっては300msより
   // 短い周期で)新しい値になるため、下の評価用setIntervalの依存配列に直接含めると、
@@ -153,15 +154,81 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
 
       // 【不具合修正】エッジ側からの誤判定(顔面アップ時の横長バウンディングボックスによる転倒判定)を
       // フロントエンド側で再検証して弾く。また、足元基準の正確な3D座標を算出する。
+      let isFalsePositive = false;
+      const now = Date.now();
+
+      // --- 速度チェック ---
+      if (details.x != null && details.y != null) {
+        const targetY = hazardType === 'fall' || hazardType === 'prone' ? 0.2 : 1.0;
+        precalculatedFloor = imageToFloor(details.x, details.y, roomConfigRef.current, targetY);
+
+        if (precalculatedFloor) {
+          const lastPos = lastKnownPositionRef.current;
+          if (lastPos.time > 0) {
+            const dt = (now - lastPos.time) / 1000;
+            if (dt > 0 && dt < 5.0) { // 過去5秒以内のデータと比較
+              const dx = precalculatedFloor.x - lastPos.x;
+              const dz = precalculatedFloor.z - lastPos.z;
+              const dist = Math.sqrt(dx * dx + dz * dz);
+              const speed = dist / dt;
+              if (speed > 4.0) { // 4m/s以上の移動はワープとして棄却
+                isFalsePositive = true;
+              }
+            }
+          }
+        }
+      }
+
       if (details.keypoints && Array.isArray(details.keypoints)) {
         const person = analyzePerson(details.keypoints, roomConfigRef.current);
         if (person) {
-          if (hazardType === 'fall' && !person.hasLowerBody) {
-            // 下半身が見えていないのに転倒と判定されている場合は誤検知として無視する
-            return;
-          }
-          precalculatedFloor = person.floor;
+          precalculatedFloor = person.floor; // より正確な足元座標で上書き
         }
+
+        if (hazardType === 'fall') {
+          const validKpts = details.keypoints.filter(k => k && k[2] > 0.5);
+          
+          // 有効なキーポイントが少なすぎる場合は誤検知とみなす
+          if (validKpts.length < 3) {
+            isFalsePositive = true;
+          } else {
+            const getKpt = (idx) => details.keypoints[idx] && details.keypoints[idx][2] > 0.5 ? details.keypoints[idx] : null;
+            // 5:l_shoulder, 6:r_shoulder
+            const shoulders = [getKpt(5), getKpt(6)].filter(Boolean);
+            // 13:l_knee, 14:r_knee, 15:l_ankle, 16:r_ankle
+            const legs = [getKpt(13), getKpt(14), getKpt(15), getKpt(16)].filter(Boolean);
+
+            // 体の一部しか見えていない（肩も脚も見えない）場合は棄却
+            if (shoulders.length === 0 && legs.length === 0) {
+              isFalsePositive = true;
+            } else if (shoulders.length > 0 && legs.length > 0) {
+              // 転倒の幾何学的チェック
+              const avgShoulderY = shoulders.reduce((sum, k) => sum + k[1], 0) / shoulders.length;
+              const avgLegY = legs.reduce((sum, k) => sum + k[1], 0) / legs.length;
+              const avgShoulderX = shoulders.reduce((sum, k) => sum + k[0], 0) / shoulders.length;
+              const avgLegX = legs.reduce((sum, k) => sum + k[0], 0) / legs.length;
+
+              const height = Math.abs(avgLegY - avgShoulderY);
+              const width = Math.abs(avgLegX - avgShoulderX);
+
+              // 幅より高さの方が大きい（立っている状態に近い）場合は棄却
+              if (height > width * 1.5) {
+                isFalsePositive = true;
+              }
+            } else if (person && !person.hasLowerBody) {
+              // 下半身が見えていないのに転倒と判定されている場合は誤検知として無視する
+              isFalsePositive = true;
+            }
+          }
+        }
+      }
+
+      if (isFalsePositive) {
+        return;
+      }
+
+      if (precalculatedFloor) {
+        lastKnownPositionRef.current = { x: precalculatedFloor.x, z: precalculatedFloor.z, time: now };
       }
 
       // 【本番環境: 一時的な人物マーカー】仕様書には継続的な姿勢ストリームが

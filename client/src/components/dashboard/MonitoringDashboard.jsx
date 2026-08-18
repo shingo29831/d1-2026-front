@@ -338,7 +338,8 @@ export default function MonitoringDashboard({
 
     const result = allPersons.map((p, idx) => {
       const id = p.id !== undefined ? p.id : idx;
-      let { x, z } = p.floor;
+      let rawX = p.floor.x;
+      let rawZ = p.floor.z;
       let isCloseUp = false;
 
       // --- 至近距離（ドアップ）判定 ---
@@ -367,27 +368,43 @@ export default function MonitoringDashboard({
             if (cameraMount) {
               const yawRad = (cameraYawDeg || 0) * (Math.PI / 180);
               const dist = 0.5; // カメラの0.5m前
-              x = cameraMount.x + dist * Math.sin(yawRad);
-              z = cameraMount.z - dist * Math.cos(yawRad);
+              rawX = cameraMount.x + dist * Math.sin(yawRad);
+              rawZ = cameraMount.z - dist * Math.cos(yawRad);
             }
           }
         }
       }
       // ------------------------------
 
+      let x = rawX;
+      let z = rawZ;
+      let rawTime = time;
+
       const prev = currentHistory[id];
       if (prev) {
         const dt = (time - prev.time) / 1000;
         if (dt > 0) {
-          const dx = x - prev.x;
-          const dz = z - prev.z;
+          // 生の検出座標が前回と同じような場所（半径1m以内）に留まっているかチェック
+          const rawDx = rawX - (prev.rawX !== undefined ? prev.rawX : prev.x);
+          const rawDz = rawZ - (prev.rawZ !== undefined ? prev.rawZ : prev.z);
+          const rawDist = Math.sqrt(rawDx * rawDx + rawDz * rawDz);
+          
+          if (rawDist < 1.0) {
+            // 同じような場所にいるので、最初にその場所に現れた時刻を引き継ぐ
+            rawTime = prev.rawTime !== undefined ? prev.rawTime : prev.time;
+          }
+
+          const dx = rawX - prev.x;
+          const dz = rawZ - prev.z;
           const dist = Math.sqrt(dx * dx + dz * dz);
           const speed = dist / dt;
 
+          // 同じ場所に一定時間（0.5秒）留まっている場合は、ワープ（実際の移動）として許可する
+          const isStable = (time - rawTime) > 500;
+
           // ドアップ判定時は速度フィルタリングをバイパスして即座に反映させる
-          // （誤検出から復帰した際にワープとして弾かれないようにするため）
-          if (speed > MAX_SPEED_M_PER_SEC && !isCloseUp) {
-            // 異常値として破棄し、前回の座標を維持
+          if (speed > MAX_SPEED_M_PER_SEC && !isCloseUp && !isStable) {
+            // 異常値として破棄し、前回の表示座標を維持
             x = prev.x;
             z = prev.z;
           }
@@ -395,10 +412,11 @@ export default function MonitoringDashboard({
           // 同一フレーム(再レンダリング)の場合は前回の計算結果をそのまま使う
           x = prev.x;
           z = prev.z;
+          rawTime = prev.rawTime !== undefined ? prev.rawTime : prev.time;
         }
       }
 
-      nextHistory[id] = { x, z, time };
+      nextHistory[id] = { x, z, time, rawX, rawZ, rawTime };
 
       return {
         id: idx,
