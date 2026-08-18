@@ -225,12 +225,13 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 
   // --- 動的キャリブレーション（個人サイズの学習） ---
   let nextState = { ...previousState };
-  // 足元が綺麗に見えていて、レイキャストが正確に行えたフレームでのみ学習する
+  const alpha = 0.05; // 学習率（急激な変化を防ぐためゆっくり学習させる）
+
+  // 1. 絶対スケールの学習（足元が綺麗に見えていて、レイキャストが正確な場合）
   if (rawFloor.isAccurateRaycast && rawFloor.distanceM > 0.5) {
     // 距離 D から実際のサイズ W_real を逆算: W_real = (2 * W_px * tanFovY * D) / (IMG_H * 1.2)
     // ※推定時に 1.2 倍の補正をかけているため、逆算時も 1.2 で割ってスケールを合わせる
     const calcReal = (px) => (2 * px * tanFovY * rawFloor.distanceM) / (IMG_H * 1.2);
-    const alpha = 0.05; // 学習率（急激な変化を防ぐためゆっくり学習させる）
 
     if (lShoulder && rShoulder) {
       const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
@@ -257,6 +258,70 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
       const h = calcReal(estimatedFullHeightPx) / verticalCompression;
       if (h > 0.8 && h < 2.2) nextState.learnedHeight = learnedHeight * (1 - alpha) + h * alpha;
     }
+  } 
+  // 2. 相対スケールの学習（足元が見えないが、複数のパーツが見えている場合）
+  // 見えているパーツ間でサイズを同期させ、一部しか映らなくなった時の距離のジャンプを防ぐ
+  else {
+    let referenceDistance = null;
+    
+    // 最も安定している肩幅を基準にする
+    if (lShoulder && rShoulder) {
+      const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
+      if (px > 10) referenceDistance = (learnedShoulderW * IMG_H) / (2 * px * tanFovY);
+    } 
+    // 肩が見えなければ顔幅を基準にする
+    else if (lEar && rEar) {
+      const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
+      if (px > 10) referenceDistance = (learnedFaceW * IMG_H) / (2 * px * tanFovY);
+    }
+
+    if (referenceDistance !== null) {
+      // 基準距離から他のパーツの実際のサイズを逆算（ここでは1.2倍補正は不要）
+      const calcReal = (px) => (2 * px * tanFovY * referenceDistance) / IMG_H;
+
+      // 肩幅が基準の場合、顔と目を学習
+      if (lShoulder && rShoulder) {
+        if (lEar && rEar) {
+          const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
+          if (px > 10) {
+            const w = calcReal(px);
+            if (w > 0.08 && w < 0.25) nextState.learnedFaceW = learnedFaceW * (1 - alpha) + w * alpha;
+          }
+        }
+        if (lEye && rEye) {
+          const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
+          if (px > 10) {
+            const w = calcReal(px);
+            if (w > 0.04 && w < 0.12) nextState.learnedEyeW = learnedEyeW * (1 - alpha) + w * alpha;
+          }
+        }
+      }
+      // 顔幅が基準の場合、目を学習
+      else if (lEar && rEar) {
+        if (lEye && rEye) {
+          const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
+          if (px > 10) {
+            const w = calcReal(px);
+            if (w > 0.04 && w < 0.12) nextState.learnedEyeW = learnedEyeW * (1 - alpha) + w * alpha;
+          }
+        }
+      }
+
+      if (estimatedFullHeightPx) {
+        const h = calcReal(estimatedFullHeightPx) / verticalCompression;
+        if (h > 0.8 && h < 2.2) nextState.learnedHeight = learnedHeight * (1 - alpha) + h * alpha;
+      }
+    }
+  }
+
+  // --- 最大ピクセルサイズの記録（大きく表示された時の基準化用） ---
+  if (lEar && rEar) {
+    const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
+    nextState.maxFacePx = Math.max(nextState.maxFacePx || 0, px);
+  }
+  if (lShoulder && rShoulder) {
+    const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
+    nextState.maxShoulderPx = Math.max(nextState.maxShoulderPx || 0, px);
   }
 
   // --- 時間的な平滑化（α-βフィルタ：速度を考慮した予測型トラッキング） ---
