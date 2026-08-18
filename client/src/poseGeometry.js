@@ -156,6 +156,12 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     // キーポイントは実際の幅より内側に出やすいため、最も遠い推定値を採用する
     // さらに、WebカメラのFOVが対角視野角で入力されているケースを考慮し 1.2 倍の補正をかける
     estimatedDistanceM = Math.max(...estimates) * 1.2;
+  } else if (isCloseUp) {
+    // ドアップ状態で耳や目が見切れて estimates が空になった場合でも、
+    // 画面の大部分を占めている（至近距離である）ことは確実なため、
+    // バウンディングボックスの幅から強制的に至近距離を算出するセーフティネット。
+    const fallbackEstimate = (learnedFaceW * IMG_H) / (2 * bboxW * tanFovY);
+    estimatedDistanceM = fallbackEstimate * 1.2;
   }
 
   // ------------------------------
@@ -546,7 +552,9 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
       floorDistanceM = estimatedDistanceM * dirLen;
     } else {
       const heightDiff = cameraMount.y - targetY;
-      if (Math.abs(dir.y) > 1e-4 && (heightDiff * dir.y < 0)) {
+      // カメラの高さと対象(targetY)の高さが近い場合、レイが水平に近くなる(dir.yが0に近い)と
+      // 距離が無限遠に飛んでしまう(ゼロ除算に近い状態)のを防ぐため、角度が浅すぎる場合は除外する。
+      if (Math.abs(dir.y) > 0.05 && (heightDiff * dir.y < 0)) {
         floorDistanceM = -heightDiff / dir.y;
       } else {
         floorDistanceM = 0.5;
