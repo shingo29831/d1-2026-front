@@ -122,9 +122,77 @@ export function RoomConfigProvider({ children }) {
     return () => { cancelled = true; };
   }, []);
 
-  const persist = useCallback((next) => {
+  // 【不具合修正】「カメラ位置の設定」タブで保存しても、別のブラウザタブ/ウィンドウで
+  // 開いたままの「見守りダッシュボード」には反映されない、というご指摘への対応。
+  // このコンテキストの状態は起動時(初回マウント時)に一度だけlocalStorageから
+  // 読み込んでReact stateに入れており、以降はReact state自体を正としてUIを
+  // 描画している(アプリ内のページ切り替えはstate切り替えのみで、RoomConfigProvider
+  // 自体は再マウントされないため、同じタブ内でのページ移動では常に最新の状態が
+  // 共有される)。ところが、見守りダッシュボードだけを別タブ/別ウィンドウで開いたまま
+  // 別のタブで設定を変更した場合、設定を変更した側のタブのlocalStorageは正しく
+  // 更新されるが、ダッシュボード側のタブは自分自身がその場で書き込んだわけではない
+  // ため、ページを再読み込みしない限りReact stateに変更が反映されない
+  // (=ダッシュボードだけ古い設定のまま、というように見える)という不具合があった。
+  // ブラウザ標準のstorageイベント(自分以外のタブ/ウィンドウがlocalStorageを
+  // 変更したときに発火する)を購読し、変更があった項目をこのタブのReact stateにも
+  // 反映することで、タブを切り替えたりダッシュボードを開いたままにしていても、
+  // 他のタブでの保存内容がリアルタイムに反映されるようにした。
+  useEffect(() => {
+    const handleStorage = (e) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      let next;
+      try {
+        next = JSON.parse(e.newValue);
+      } catch {
+        return;
+      }
+      if (!next || typeof next !== 'object') return;
+      if (next.shape) setShapeState(next.shape);
+      if (next.height != null) setHeightState(next.height);
+      if (next.cameraMount) setCameraMountState(next.cameraMount);
+      if (next.cameraYawDeg != null) setCameraYawDegState(next.cameraYawDeg);
+      if (next.cameraPitchDeg != null) setCameraPitchDegState(next.cameraPitchDeg);
+      if (next.cameraFovDeg != null) setCameraFovDegState(next.cameraFovDeg);
+      if (next.cameraRangeM != null) setCameraRangeMState(next.cameraRangeM);
+      if (next.cameraMode) setCameraModeState(next.cameraMode);
+      if (Array.isArray(next.furniture)) setFurnitureState(next.furniture);
+      if (Array.isArray(next.zones)) setZonesState(next.zones);
+      if (Array.isArray(next.doorSensors)) setDoorSensorsState(next.doorSensors);
+      if (Array.isArray(next.walls)) setWallsState(next.walls);
+    };
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
+
+  // 【不具合修正】以前はbuildPersistPayload()が組み立てた「その時点のReact state
+  // 全体のスナップショット」をそのままここでlocalStorageに上書き保存していた。
+  // ところが「カメラ位置の設定」タブの保存ボタン(handleSave)のように、1つの
+  // クリックハンドラの中でsetCameraPlacement→setCameraPitch→setCameraFov→
+  // setCameraRangeと複数のsetXXXを連続で呼ぶ場合、React 18はこれらのstate更新を
+  // まとめてバッチ処理するため、ハンドラが実行し終わるまで再レンダーが起きず、
+  // 各setXXX内のbuildPersistPayloadは「ハンドラ開始時点のまま」のcameraMount等を
+  // 参照し続けてしまう。その結果、後から呼ばれるsetXXXほど、直前のsetXXXが
+  // 書き込んだはずの新しい値(例:高さ・視野角)を「まだ古い値のまま」の
+  // スナップショットで上書きしてしまい、保存ボタンを押しても最後に呼ばれた
+  // 項目以外(高さ・視野角など)が実質的に反映されない(=見守りダッシュボードに
+  // 反映されない)という不具合があった。
+  // 対策として、persist()は渡された差分(overrides)だけを、その時点で
+  // localStorageに実際に書き込まれている最新の内容(直前のsetXXX呼び出しに
+  // よる書き込みも含む)に対してマージする。localStorageへの書き込みは
+  // 同期的に完結するため、同じハンドラ内で連続して呼んでも取りこぼしがない。
+  const persist = useCallback((overrides) => {
     try {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      let current = null;
+      if (raw) {
+        try {
+          current = JSON.parse(raw);
+        } catch {
+          current = null;
+        }
+      }
+      const base = current && typeof current === 'object' ? current : {};
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...base, ...overrides }));
     } catch {
       // 保存できなくても致命的ではないため無視(プライベートブラウズ等で容量制限にかかる場合がある)
     }
@@ -154,16 +222,6 @@ export function RoomConfigProvider({ children }) {
     return { ...wall, x1: p1.x, z1: p1.z, x2: p2.x, z2: p2.z };
   }, [clampToBounds]);
 
-  // persist()に渡す共通フィールドをまとめるヘルパー。カメラの上下角度(pitch)や
-  // 開閉センサーなど新しく増えた項目も、他のsetXXX関数が個別に持つ最新値を
-  // 明示的に渡さないと、無関係な項目を更新しただけでlocalStorageから消えて
-  // しまう(=次回起動時に既定値へ巻き戻る)ため、必ずここを経由して保存する。
-  const buildPersistPayload = useCallback((overrides) => ({
-    shape, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode,
-    furniture, zones, walls, doorSensors,
-    ...overrides,
-  }), [shape, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, furniture, zones, walls, doorSensors]);
-
   const setRoomShape = useCallback((nextShape) => {
     const nextBounds = footprintBounds(nextShape.footprint);
     const nextFurniture = furniture.map((f) => clampToBounds(f, nextBounds));
@@ -177,44 +235,44 @@ export function RoomConfigProvider({ children }) {
     setCameraMountState(nextCameraMount);
     setDoorSensorsState(nextDoorSensors);
     setWallsState(nextWalls);
-    persist(buildPersistPayload({
+    persist({
       shape: nextShape, cameraMount: nextCameraMount, furniture: nextFurniture, zones: nextZones, doorSensors: nextDoorSensors, walls: nextWalls,
-    }));
-  }, [furniture, zones, cameraMount, doorSensors, walls, persist, clampToBounds, clampWallToBounds, buildPersistPayload]);
+    });
+  }, [furniture, zones, cameraMount, doorSensors, walls, persist, clampToBounds, clampWallToBounds]);
 
   const setRoomHeight = useCallback((h) => {
     setHeightState(h);
-    persist(buildPersistPayload({ height: h }));
-  }, [persist, buildPersistPayload]);
+    persist({ height: h });
+  }, [persist]);
 
   const setCameraPlacement = useCallback((mount, yawDeg, mode) => {
     setCameraMountState(mount);
     setCameraYawDegState(yawDeg);
     if (mode) setCameraModeState(mode);
-    persist(buildPersistPayload({ cameraMount: mount, cameraYawDeg: yawDeg, cameraMode: mode || cameraMode }));
-  }, [cameraMode, persist, buildPersistPayload]);
+    persist({ cameraMount: mount, cameraYawDeg: yawDeg, ...(mode ? { cameraMode: mode } : {}) });
+  }, [persist]);
 
   const setCameraPitch = useCallback((deg) => {
     setCameraPitchDegState(deg);
-    persist(buildPersistPayload({ cameraPitchDeg: deg }));
-  }, [persist, buildPersistPayload]);
+    persist({ cameraPitchDeg: deg });
+  }, [persist]);
 
   const setCameraFov = useCallback((deg) => {
     setCameraFovDegState(deg);
-    persist(buildPersistPayload({ cameraFovDeg: deg }));
-  }, [persist, buildPersistPayload]);
+    persist({ cameraFovDeg: deg });
+  }, [persist]);
 
   // 「カメラの見える範囲」(検知・表示距離)の変更。視野角(FOV)とは独立して、
   // 間取り図・3Dプレビューの扇形をどこまで伸ばすかを調整できるようにする。
   const setCameraRange = useCallback((m) => {
     setCameraRangeMState(m);
-    persist(buildPersistPayload({ cameraRangeM: m }));
-  }, [persist, buildPersistPayload]);
+    persist({ cameraRangeM: m });
+  }, [persist]);
 
   const setFurnitureList = useCallback((nextFurniture) => {
     setFurnitureState(nextFurniture);
-    persist(buildPersistPayload({ furniture: nextFurniture }));
-  }, [persist, buildPersistPayload]);
+    persist({ furniture: nextFurniture });
+  }, [persist]);
 
   const addFurniture = useCallback((item) => {
     const withId = { id: nextLocalId('f'), label: '家具', width: 0.6, depth: 0.5, height: 0.5, color: '#8b6b47', x: 0, z: 0, ...item };
@@ -232,8 +290,8 @@ export function RoomConfigProvider({ children }) {
 
   const setZonesList = useCallback((nextZones) => {
     setZonesState(nextZones);
-    persist(buildPersistPayload({ zones: nextZones }));
-  }, [persist, buildPersistPayload]);
+    persist({ zones: nextZones });
+  }, [persist]);
 
   const addZone = useCallback((item) => {
     const withId = { id: nextLocalId('z'), label: '危険エリア', type: 'danger', width: 0.8, depth: 0.8, x: 0, z: 0, ...item };
@@ -261,8 +319,8 @@ export function RoomConfigProvider({ children }) {
   // device_idと突き合わせるための識別子)と status('closed'|'open')を持つ。
   const setDoorSensorsList = useCallback((nextDoorSensors) => {
     setDoorSensorsState(nextDoorSensors);
-    persist(buildPersistPayload({ doorSensors: nextDoorSensors }));
-  }, [persist, buildPersistPayload]);
+    persist({ doorSensors: nextDoorSensors });
+  }, [persist]);
 
   const addDoorSensor = useCallback((item) => {
     const withId = {
@@ -296,8 +354,8 @@ export function RoomConfigProvider({ children }) {
   // で表す形のため、他とは少し異なるデータ形になっている)。
   const setWallsList = useCallback((nextWalls) => {
     setWallsState(nextWalls);
-    persist(buildPersistPayload({ walls: nextWalls }));
-  }, [persist, buildPersistPayload]);
+    persist({ walls: nextWalls });
+  }, [persist]);
 
   const addWall = useCallback((item) => {
     const withId = { id: nextLocalId('wall'), label: '壁', x1: 0, z1: 0, x2: 0, z2: 0, ...item };

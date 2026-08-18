@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 import { footprintBounds, footprintCenter, footprintEdges, pointInPolygon } from '../../roomShapes';
 import { isInsideZone } from '../../poseGeometry';
 import { getIncidentsSortedDesc, CATEGORIES, GROUPS } from '../../incidentHistory';
@@ -81,6 +82,7 @@ function formatRelative(iso, nowMs) {
 export default function HistoryPage() {
   const { footprint, walls, zones } = useRoomConfig();
   const { theme } = useTheme();
+  const { isProduction } = useOperationMode();
   // 既定では全種類を選択状態にし、「すべての危険行為」をまとめて表示する。
   // 個別のチップを外すことで、その危険行為だけに絞り込んだ表示にもできる
   // (=すべての表示と、各危険行為ごとの個別表示の両方に対応)。
@@ -107,22 +109,26 @@ export default function HistoryPage() {
   // 展開表示する。
   const [filterOpen, setFilterOpen] = useState(false);
 
-  // 履歴データの取得状態。初期値はモックデータを表示しておき(画面が空にならないよう)、
-  // 裏でAPIへの取得を試みて、成功したら差し替える(historyApi.js参照)。
-  const [historyState, setHistoryState] = useState(() => ({
-    incidents: getIncidentsSortedDesc(),
-    source: 'mock',
-    error: null,
-    loading: true,
-  }));
+  // 履歴データの取得状態。
+  // デモ用データモードでは、初期値としてモックデータを先に表示しておき(画面が
+  // 空にならないよう)、裏でAPIへの取得を試みて成功したら差し替える。
+  // 【重要】本番環境モードでは、サンプルデータを「それらしく」先に見せてしまうと
+  // 実際にはまだ何も取得できていないことに気づきにくいため、初期値は空にし、
+  // 取得できるまでは「読み込み中」の表示のままにする(historyApi.js参照)。
+  const [historyState, setHistoryState] = useState(() => (
+    isProduction
+      ? { incidents: [], source: 'error', error: null, loading: true }
+      : { incidents: getIncidentsSortedDesc(), source: 'mock', error: null, loading: true }
+  ));
 
   useEffect(() => {
     let cancelled = false;
-    fetchIncidentsSortedDesc().then((result) => {
+    setHistoryState((prev) => ({ ...prev, loading: true }));
+    fetchIncidentsSortedDesc({ isProduction }).then((result) => {
       if (!cancelled) setHistoryState({ ...result, loading: false });
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [isProduction]);
 
   // historyApi.js経由の実データは、位置(x, z)が不明な項目(現状の"ai_hazard"等
   // すべて。画像上のピクセル座標しか無く、カメラキャリブレーション行列が
@@ -290,15 +296,28 @@ export default function HistoryPage() {
         ヒートマップで確認できます。色が濃い(赤みが強い)場所ほど、発生回数が多いエリアです。
       </p>
 
+      {/* 【重要】デモ用データモードでは、履歴APIの設定有無に関わらず実データへは
+          通信せず、常にこの端末で自由に追加・編集・削除できるサンプルデータを
+          表示する(historyApi.js参照。ハンバーガーメニュー「管理画面」→「危険行為
+          履歴データの編集」から編集できる)。 */}
       {!historyState.loading && historyState.source === 'mock' && (
         <p style={s.dataSourceNote}>
-          {historyState.error
-            ? `⚠ 履歴APIからの取得に失敗したため、サンプルデータを表示しています(${historyState.error})`
-            : '※ 現時点ではサンプルデータを表示しています(履歴APIの接続先が未設定です)。'}
+          ※ デモ用データモードのため、サンプルデータを表示しています。管理画面の「危険行為履歴データの編集」から自由に追加・編集・削除できます。
         </p>
       )}
       {!historyState.loading && historyState.source === 'api' && (
         <p style={s.dataSourceNoteOk}>✓ 履歴API(実データ)から取得した内容を表示しています。</p>
+      )}
+      {/* 【重要】本番環境モードでは、取得に失敗してもサンプルデータへ差し替えない
+          (historyApi.js参照)。「一見動いているように見えるが実は取得できていない」
+          という誤解を避けるため、はっきりとしたエラー表示にする。 */}
+      {!historyState.loading && historyState.source === 'error' && (
+        <p style={s.dataSourceNoteError}>
+          ✕ 本番環境モードのため、サンプルデータへの切り替えは行っていません。履歴データを取得できませんでした{historyState.error ? `(${historyState.error})` : ''}。接続状況ページでAWS(Cognito・履歴API)の状態をご確認ください。
+        </p>
+      )}
+      {historyState.loading && (
+        <p style={s.dataSourceNote}>読み込み中…</p>
       )}
 
       <div style={s.statRow}>
@@ -683,6 +702,10 @@ function makeStyles(theme) {
     },
     dataSourceNoteOk: {
       maxWidth: 1100, fontSize: 12, color: theme.accent, marginTop: -10, marginBottom: 18,
+      lineHeight: 1.6,
+    },
+    dataSourceNoteError: {
+      maxWidth: 1100, fontSize: 12.5, fontWeight: 600, color: theme.danger, marginTop: -10, marginBottom: 18,
       lineHeight: 1.6,
     },
     statRow: { display: 'flex', gap: 14, marginBottom: 24, flexWrap: 'wrap' },

@@ -1,4 +1,4 @@
-import React, { Suspense, useMemo } from 'react';
+import React, { Suspense, useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
@@ -88,32 +88,100 @@ function FlatFurniture({ item }) {
   );
 }
 
-function Bar({ cell, maxCount }) {
+// 各棒の高さ(メートル)を、そのマスの件数と最大件数の比率から求める
+// (InstancedBars・BarLabelsの両方で同じ計算式を使うため、共通関数として切り出す)。
+function barHeight(cell, maxCount) {
   const ratio = maxCount > 0 ? cell.count / maxCount : 0;
-  const h = MIN_BAR_HEIGHT_M + ratio * (MAX_BAR_HEIGHT_M - MIN_BAR_HEIGHT_M);
-  const color = colorForRatio(ratio);
+  return MIN_BAR_HEIGHT_M + ratio * (MAX_BAR_HEIGHT_M - MIN_BAR_HEIGHT_M);
+}
+
+// setMatrixAt/setColorAtの計算専用に使い回す作業用オブジェクト。
+// 毎フレーム・毎セルごとに新しいTHREE.Object3D/THREE.Colorを生成すると
+// ガベージコレクションの負荷が増えるため、モジュールスコープで1つだけ用意し、
+// 使うたびに値を上書きする(three.js/@react-three/fiberでよく使われる定石)。
+const dummyObject = new THREE.Object3D();
+const dummyColor = new THREE.Color();
+
+// 【Role C仕様書 Step 5 対応】履歴データが増えてマス目(cells)が数百〜数千に
+// なっても、個別の<mesh>を積み上げるとドローコールが人数分(セル数分)に
+// 増大してFPSが著しく低下する(仕様書で明示的に禁止されている実装)。
+// そのため、全ての棒を1個の<instancedMesh>・1回のドローコールで描画する。
+// 位置・高さ・色は、cellsが変わるたびにuseEffect内でsetMatrixAt/setColorAtを
+// 使って書き込む(Reactの再描画のたびに毎回インスタンス数ぶんの<mesh>を
+// 生成・破棄するのではなく、既存のバッファへ直接書き込むことでコストを抑える)。
+function InstancedBars({ cells, maxCount }) {
+  const meshRef = useRef(null);
+  const count = cells.length;
+
+  useEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh || count === 0) return;
+    cells.forEach((cell, i) => {
+      const h = barHeight(cell, maxCount);
+      // ジオメトリ自体は1辺1(単位立方体)のboxGeometryを使い回し、
+      // インスタンスごとのスケール(scale)で実際の太さ・高さに変形する。
+      dummyObject.position.set(cell.x, h / 2, cell.z);
+      dummyObject.scale.set(CELL_M * BAR_WIDTH_RATIO, h, CELL_M * BAR_WIDTH_RATIO);
+      dummyObject.rotation.set(0, 0, 0);
+      dummyObject.updateMatrix();
+      mesh.setMatrixAt(i, dummyObject.matrix);
+
+      const ratio = maxCount > 0 ? cell.count / maxCount : 0;
+      dummyColor.set(colorForRatio(ratio));
+      mesh.setColorAt(i, dummyColor);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }, [cells, maxCount, count]);
+
+  // countが変わるとargsも変わるため、@react-three/fiberが古いinstancedMeshを
+  // 破棄して新しく作り直す(instancedMeshのインスタンス数は生成後に変更できない
+  // three.jsの仕様のため)。0件のときはメッシュ自体を描画しない。
+  if (count === 0) return null;
+
   return (
-    <group position={[cell.x, 0, cell.z]}>
-      <mesh position={[0, h / 2, 0]} castShadow>
-        <boxGeometry args={[CELL_M * BAR_WIDTH_RATIO, h, CELL_M * BAR_WIDTH_RATIO]} />
-        <meshStandardMaterial color={color} roughness={0.5} metalness={0.05} />
-      </mesh>
-      <Html center distanceFactor={7} position={[0, h + 0.16, 0]} occlude={false}>
-        <div
-          style={{
-            padding: '2px 7px',
-            borderRadius: 999,
-            fontSize: 10.5,
-            fontWeight: 700,
-            color: '#fff',
-            background: 'rgba(15,23,42,0.82)',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {cell.count}件
-        </div>
-      </Html>
-    </group>
+    <instancedMesh ref={meshRef} args={[null, null, count]} castShadow>
+      <boxGeometry args={[1, 1, 1]} />
+      <meshStandardMaterial roughness={0.5} metalness={0.05} />
+    </instancedMesh>
+  );
+}
+
+// 件数バッジ(「◯件」の吹き出し)は棒の本数ぶんだけ必要なDOM要素(<Html>)のため、
+// InstancedMeshには含められない。ただしこちらはWebGLのドローコールを消費する
+// ものではなく(通常のDOM要素としてオーバーレイ表示される)、棒の描画とは別の
+// コンポーネントに分離しても、上記InstancedBarsのパフォーマンス最適化には
+// 影響しない。
+function BarLabels({ cells, maxCount }) {
+  return (
+    <>
+      {cells.map((cell) => {
+        const h = barHeight(cell, maxCount);
+        return (
+          <Html
+            key={`${cell.x}_${cell.z}`}
+            center
+            distanceFactor={7}
+            position={[cell.x, h + 0.16, cell.z]}
+            occlude={false}
+          >
+            <div
+              style={{
+                padding: '2px 7px',
+                borderRadius: 999,
+                fontSize: 10.5,
+                fontWeight: 700,
+                color: '#fff',
+                background: 'rgba(15,23,42,0.82)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {cell.count}件
+            </div>
+          </Html>
+        );
+      })}
+    </>
   );
 }
 
@@ -163,9 +231,8 @@ export default function IncidentBarChart3D({ incidents }) {
           <FlatFurniture key={f.id} item={f} />
         ))}
 
-        {cells.map((c) => (
-          <Bar key={`${c.x}_${c.z}`} cell={c} maxCount={maxCount} />
-        ))}
+        <InstancedBars cells={cells} maxCount={maxCount} />
+        <BarLabels cells={cells} maxCount={maxCount} />
 
         {/* 「3D表示の下のあみあみ(網目)を消してほしい」という要望を受けてgridHelperを削除。 */}
         <OrbitControls enableDamping dampingFactor={0.1} minDistance={0.8} maxDistance={24} />

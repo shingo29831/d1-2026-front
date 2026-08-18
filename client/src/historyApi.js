@@ -157,13 +157,42 @@ function extractList(data) {
   return null;
 }
 
-// 履歴データを取得する。戻り値: { incidents, source: 'api'|'mock', error: string|null }
+// 履歴データを取得する。戻り値: { incidents, source: 'api'|'mock'|'error', error: string|null }
 // incidents内の各項目は、床座標(x, z)が不明なもの(現状の"ai_hazard"等すべて)は
 // x: null, z: null, approx: true になっている。実際の間取りに配置する処理は
 // HistoryPage.jsx側(部屋の中心へフォールバック)に委ねる。
-export async function fetchIncidentsSortedDesc() {
+//
+// 【重要・本番環境モードでの挙動】opts.isProductionがtrueのとき(ハンバーガー
+// メニューの「本番環境」モード)は、取得に失敗しても`incidentHistory.js`の
+// サンプルデータへ自動フォールバックしない。以前はデモ用データモードと同じ
+// ロジックを共有しており、本番環境で履歴APIへの疎通が切れていても画面には
+// 「もっともらしい」サンプルデータがそのまま表示され続け、実際にはデータを
+// 取得できていないことに気づきにくいという問題があった(お客様からのご指摘)。
+// 本番環境では、取得できなかった場合は source: 'error' ・ incidents: [] を返し、
+// 呼び出し側(HistoryPage.jsx等)で「取得できませんでした」と明確に表示する。
+//
+// 【重要・デモ用データモードでの挙動】opts.isProductionがfalse(デモ用データ
+// モード)のときは、VITE_HISTORY_API_URLが設定されているかどうかに関わらず、
+// 実際のAWS履歴APIへは一切通信せず、常にincidentHistory.js内のこの端末で
+// 自由に追加・編集・削除できるデータ(getEditableIncidents()と同じ内容)を返す。
+// 以前は履歴APIが設定されていると、デモ用データモードでも実データへ問い合わせて
+// しまい、画面(危険行為の履歴・見守りダッシュボードのAIリスクサジェスト表示等)に
+// 編集内容ではなく実データが表示されてしまう不具合があった。実データへの通信が
+// 発生するのは本番環境モードのときだけ。
+// 実際のAWS履歴API(VITE_HISTORY_API_URL)へ問い合わせる共通処理。
+// 成功時は { incidents, source: 'api', error: null } を返す。
+// 失敗時(URL未設定・通信エラー・タイムアウト・レスポンス形式異常・0件)は
+// { incidents: [], source: 'error', error: message } を返す(例外は投げない)。
+// 【重要】この関数自体はデモ/本番モードを一切見ない、実データへの問い合わせのみを
+// 行う低レベル処理。呼び出し側(fetchIncidentsSortedDesc / checkHistoryApiConnectivity)
+// が、いつこれを呼ぶかを判断する。
+async function fetchRealIncidentsFromApi() {
   if (!HISTORY_API_URL) {
-    return { incidents: getMockIncidentsSortedDesc(), source: 'mock', error: null };
+    return {
+      incidents: [],
+      source: 'error',
+      error: '履歴API(VITE_HISTORY_API_URLの環境変数)が設定されていません。',
+    };
   }
 
   // 【重要】fetch()には既定でタイムアウトが無いため、API側やネットワーク経路が
@@ -176,7 +205,7 @@ export async function fetchIncidentsSortedDesc() {
 
   try {
     const token = await getIdToken();
-    
+
     // Role BのDynamoDBクエリ(GSI)に必要な必須パラメータを付与
     const url = new URL(HISTORY_API_URL);
     url.searchParams.append('room_id', 'living_room');
@@ -204,17 +233,53 @@ export async function fetchIncidentsSortedDesc() {
     }
     return { incidents, source: 'api', error: null };
   } catch (err) {
-    // eslint-disable-next-line no-console
-    console.warn('[historyApi] 履歴APIの取得に失敗したため、サンプルデータで代替します:', err);
     const isTimeout = err && err.name === 'AbortError';
-    return {
-      incidents: getMockIncidentsSortedDesc(),
-      source: 'mock',
-      error: isTimeout
-        ? 'APIの応答がありませんでした(10秒でタイムアウトしました)。ネットワーク環境(社内ネットワーク/VPN等の制限)をご確認ください。'
-        : (err && err.message ? err.message : String(err)),
-    };
+    const message = isTimeout
+      ? 'APIの応答がありませんでした(10秒でタイムアウトしました)。ネットワーク環境(社内ネットワーク/VPN等の制限)をご確認ください。'
+      : (err && err.message ? err.message : String(err));
+    return { incidents: [], source: 'error', error: message };
   } finally {
     clearTimeout(timeoutId);
   }
+}
+
+export async function fetchIncidentsSortedDesc(opts = {}) {
+  const isProduction = !!opts.isProduction;
+
+  // 【重要・バグ修正】以前は、デモ用データモードであってもVITE_HISTORY_API_URLが
+  // 設定されていれば実際のAWS履歴APIへ問い合わせてしまい、「デモ用データモードでは
+  // 画面から自由に追加・編集・削除できるようにしてほしい」というご要望に反して、
+  // ダッシュボードのAIリスクサジェスト表示や危険行為の履歴・ヒートマップが、
+  // ユーザーが編集した内容ではなく実データ(Role Bの履歴API)で上書きされてしまう
+  // 不具合があった(本番環境モードでない限り、実データへは一切問い合わせない、
+  // という区別が徹底されていなかった)。
+  // デモ用データモードでは、履歴APIが設定されているかどうかに関わらず、常に
+  // incidentHistory.js内のこの端末で編集可能なデータをそのまま使う(実データへは
+  // 一切通信しない)。実データへの通信は本番環境モードのときのみ行う。
+  if (!isProduction) {
+    return { incidents: getMockIncidentsSortedDesc(), source: 'mock', error: null };
+  }
+
+  const result = await fetchRealIncidentsFromApi();
+  if (result.source === 'error') {
+    // 【重要】本番環境モードではサンプルデータへフォールバックしない
+    // (このファイル冒頭のコメント参照)。
+    // eslint-disable-next-line no-console
+    console.warn('[historyApi] (本番環境モード)履歴APIの取得に失敗しました。サンプルデータへはフォールバックしません:', result.error);
+    if (result.error && result.error.startsWith('履歴API(')) {
+      return { ...result, error: `本番環境モードですが、${result.error}` };
+    }
+  }
+  return result;
+}
+
+// 「接続状況」診断ページ(ConnectionStatusPage.jsx)専用。
+// 【重要】この関数は、現在デモ用データモードか本番環境モードかに関わらず、
+// 常に実際のAWS履歴APIへの疎通を試みる。ConnectionStatusPageの目的は
+// 「AWSと実際に通信できているか」を確認することであり、デモ用データモードの
+// ときに画面(危険行為の履歴等)へ実データを表示しない(fetchIncidentsSortedDesc
+// 参照)こととは別の関心事のため、あえてfetchIncidentsSortedDescは使わず、
+// この専用関数を用意している。
+export async function checkHistoryApiConnectivity() {
+  return fetchRealIncidentsFromApi();
 }

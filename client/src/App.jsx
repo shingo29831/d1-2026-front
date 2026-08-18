@@ -11,6 +11,7 @@ import FurnitureSetupPage from './components/furniture-zone-setup/FurnitureSetup
 import ZoneSetupPage from './components/furniture-zone-setup/ZoneSetupPage';
 import DoorSensorSetupPage from './components/door-sensor-setup/DoorSensorSetupPage';
 import HistoryPage from './components/history/HistoryPage';
+import IncidentDataEditorPage from './components/history/IncidentDataEditorPage';
 import ConnectionStatusPage from './components/connection-status/ConnectionStatusPage';
 import LoginPage from './components/auth/LoginPage';
 import VersionBadge from './components/layout/VersionBadge';
@@ -19,6 +20,7 @@ import { useDetectionPipeline } from './hooks/useDetectionPipeline';
 import { useMonitoringAlerts } from './hooks/useMonitoringAlerts';
 import { RoomConfigProvider } from './roomConfigContext';
 import { ThemeProvider, useTheme } from './themeContext';
+import { OperationModeProvider } from './operationModeContext';
 
 // 【重要】以前はここでログイン状態をlocalStorageに保存し、ブラウザを閉じても
 // ログインしたままになる「ログイン状態を保持する」機能があったが、「サイトを
@@ -88,11 +90,16 @@ const LEGACY_AUTH_KEYS = ['system1.auth.v1', 'system1.auth.email.v1', 'system1.a
 export default function App() {
   return (
     <ThemeProvider>
-      <RoomConfigProvider>
-        <Root />
-        {/* ログイン画面・見守り画面のどちらでも常に右下にバージョンを表示する */}
-        <VersionBadge />
-      </RoomConfigProvider>
+      {/* デモ用データ/本番環境の切り替え(OperationModeProvider)は、検出パイプライン
+          (useDetectionPipeline.js、AppShell内で呼び出す)からも参照するため、
+          RoomConfigProviderの外側かつRootの外側に配置しておく。 */}
+      <OperationModeProvider>
+        <RoomConfigProvider>
+          <Root />
+          {/* ログイン画面・見守り画面のどちらでも常に右下にバージョンを表示する */}
+          <VersionBadge />
+        </RoomConfigProvider>
+      </OperationModeProvider>
     </ThemeProvider>
   );
 }
@@ -263,6 +270,8 @@ function AppShell({ userEmail, authMode, onLogout }) {
           {page === 'doorSensorSetup' && <DoorSensorSetupPage />}
 
           {page === 'history' && <HistoryPage />}
+
+          {page === 'historyDataEdit' && <IncidentDataEditorPage />}
 
           {page === 'connectionStatus' && (
             <ConnectionStatusPage

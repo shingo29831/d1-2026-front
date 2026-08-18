@@ -9,6 +9,7 @@ import { isInsideZone, imageToFloor } from '../../poseGeometry';
 import { isPositionBlocked, resolveSafePosition } from '../../roomCollision';
 import { THRESHOLDS } from '../../config';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 import { getIncidentsSortedDesc } from '../../incidentHistory';
 import { fetchIncidentsSortedDesc } from '../../historyApi';
 
@@ -42,10 +43,12 @@ export default function MonitoringDashboard({
   isLost,
   personCount,
   allPersons,
+  hazardMarkers,
   pushNotification,
 }) {
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'pov'
   const { theme } = useTheme();
+  const { isProduction } = useOperationMode();
   const { footprint, zones, walls, furniture, roomShapeType, cameraMount, cameraYawDeg } = useRoomConfig();
 
   // --------------------------------------------------------------
@@ -57,17 +60,22 @@ export default function MonitoringDashboard({
   // IncidentHeatmap3D.jsx)と同じロジック(incidentHeatmap.js)を使う。
   // --------------------------------------------------------------
   const [showHeatmap, setShowHeatmap] = useState(false);
-  const [heatmapHistoryState, setHeatmapHistoryState] = useState(() => ({
-    incidents: getIncidentsSortedDesc(),
-    source: 'mock',
-  }));
+  // 【重要】本番環境モードでは、取得に失敗してもサンプルデータへフォールバック
+  // しない(historyApi.js参照)。ここは背景に重ねる補助的なヒートマップのため
+  // 専用のエラー表示までは出さないが、取得できなかった場合はincidents:[]の
+  // ままにして「実在しないホットスポット」が表示されないようにする。
+  const [heatmapHistoryState, setHeatmapHistoryState] = useState(() => (
+    isProduction
+      ? { incidents: [], source: 'error' }
+      : { incidents: getIncidentsSortedDesc(), source: 'mock' }
+  ));
   useEffect(() => {
     let cancelled = false;
-    fetchIncidentsSortedDesc().then((result) => {
+    fetchIncidentsSortedDesc({ isProduction }).then((result) => {
       if (!cancelled) setHeatmapHistoryState(result);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [isProduction]);
   const heatmapRoomCenter = useMemo(() => footprintCenter(footprint), [footprint]);
   // historyApi.js経由の実データは、位置(x, z)が不明な項目がx: null, z: nullで
   // 返ってくるため、HistoryPage.jsxと同じ方針で部屋の中心に概算配置しておく
@@ -312,6 +320,19 @@ export default function MonitoringDashboard({
     onSelect: () => setSelectedDummyId(d.id),
   }));
 
+  // 本番環境モードでAWS IoT Coreのai_hazardイベントから生成された、一時的な
+  // 人型マーカー(useMonitoringAlerts.js参照)。仕様書には継続的な姿勢ストリームが
+  // 無いため、実検出(people)のように毎フレーム座標が更新され続けることはなく、
+  // 発生した場所に数秒間だけ留まってから自動的に消える。表示位置は実検出と同じく
+  // 家具・壁にめり込まないよう安全な位置へ補正する。危険を知らせる表示のため、
+  // 常にcolorState:'danger'(赤系)で表示する。
+  const hazardPeople = (Array.isArray(hazardMarkers) ? hazardMarkers : []).map((h) => ({
+    id: `hazard-${h.id}`,
+    floor: resolveSafePosition(h.floor, { walls: collisionWalls, furniture }),
+    fallen: h.fallen,
+    colorState: 'danger',
+  }));
+
   const styles = useMemo(() => ({
     page: { display: 'flex', flexDirection: 'column', height: '100%', background: theme.appBg },
     body: { flex: 1, display: 'flex', minHeight: 0 },
@@ -365,7 +386,7 @@ export default function MonitoringDashboard({
         <div style={styles.sceneWrap}>
           <RoomScene
             viewMode={viewMode}
-            people={[...people, ...dummyPeople]}
+            people={[...people, ...dummyPeople, ...hazardPeople]}
             showHeatmap={showHeatmap}
             heatmapIncidents={heatmapIncidents}
             riskSuggestions={riskSuggestions}

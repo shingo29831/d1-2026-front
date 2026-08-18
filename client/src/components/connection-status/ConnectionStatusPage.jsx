@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { fetchAuthSession } from 'aws-amplify/auth';
 import { useTheme } from '../../themeContext';
+import { useOperationMode } from '../../operationModeContext';
 import { isCognitoConfigured, AWS_REGION } from '../../amplifyConfig';
 import { describeCognitoError } from '../../cognitoErrors';
-import { fetchIncidentsSortedDesc } from '../../historyApi';
+import { checkHistoryApiConnectivity } from '../../historyApi';
 import { getSignedIotWebSocketUrl } from '../../iotClient';
 import { withTimeout } from '../../withTimeout';
 
@@ -35,11 +36,14 @@ import { withTimeout } from '../../withTimeout';
 //                   自動実行にしていない理由: Cognitoの一時クレデンシャルが
 //                   必要な上、ネットワーク環境によっては接続確立(または
 //                   タイムアウト)までに数秒かかることがあるため。
-//   ・履歴API     : ページ表示時に自動でfetchIncidentsSortedDesc()を呼び、
-//                   実データ('api')かサンプルデータへのフォールバック('mock')
-//                   かを確認する(historyApi.js内で通信エラー時は自動的に
-//                   サンプルデータへフォールバックする仕様のため、通信自体が
-//                   失敗しても画面が壊れることは無い)。
+//   ・履歴API     : ページ表示時に自動でcheckHistoryApiConnectivity()を呼び、
+//                   デモ/本番のどちらのモードでも常に実際のAWS履歴APIへの疎通を
+//                   試みて、実データを取得できるか('api')・できないか('error')を
+//                   確認する(危険行為の履歴・見守りダッシュボード等の画面表示に
+//                   使うfetchIncidentsSortedDesc()は、デモ用データモードのときは
+//                   実データへ一切通信しないため、この診断目的には使えない。
+//                   historyApi.js参照)。通信自体が失敗しても、この診断表示が
+//                   壊れることは無い(エラーメッセージを表示するだけ)。
 //   ・S3/デプロイ  : ライブでの接続確認はできない(ブラウザからS3へ書き込み
 //                   確認する手段が無いため)。設定値の表示のみ。
 //   ・検出パイプライン: useDetectionPipeline()が返す状態(App.jsxから
@@ -54,6 +58,7 @@ export default function ConnectionStatusPage({
   lastPoseAt,
 }) {
   const { theme } = useTheme();
+  const { isProduction } = useOperationMode();
   const styles = useMemo(() => makeStyles(theme), [theme]);
 
   const HISTORY_API_URL = import.meta.env.VITE_HISTORY_API_URL || '';
@@ -109,30 +114,41 @@ export default function ConnectionStatusPage({
   // --- 履歴API(自動確認) ---
   const [historyStatus, setHistoryStatus] = useState({ state: 'checking', message: '確認中…' });
 
+  // 【重要】ここでは常にcheckHistoryApiConnectivity()(実データへの疎通を必ず
+  // 試みる診断専用関数)を呼ぶ。危険行為の履歴・見守りダッシュボード等の実際の
+  // 画面表示に使うfetchIncidentsSortedDesc()は、デモ用データモードのときは
+  // 実データへ一切通信しない(historyApi.js参照)ため、このページの目的
+  // (AWSと実際に通信できているかどうかの確認)には使えない。デモ用データ
+  // モードでも「AWS自体には実際に繋がっているか」をここでは確認できるように
+  // している(画面上の表示メッセージだけ、現在のモードに応じて出し分ける)。
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setHistoryStatus({ state: 'checking', message: '確認中…' });
-      const { incidents, source, error } = await fetchIncidentsSortedDesc();
+      const { incidents, source, error } = await checkHistoryApiConnectivity();
       if (cancelled) return;
       if (source === 'api') {
         setHistoryStatus({ state: 'ok', message: `履歴APIから実データを取得できました(${incidents.length}件)。`, source });
-      } else if (error) {
+      } else if (error && error.includes('VITE_HISTORY_API_URL')) {
         setHistoryStatus({
-          state: 'error',
-          message: `履歴APIへの接続に失敗したため、サンプルデータを表示中です(${error})。`,
+          state: 'unconfigured',
+          message: isProduction
+            ? '履歴API(VITE_HISTORY_API_URL)が未設定のため、本番環境モードでは実データを取得できません。'
+            : '履歴API(VITE_HISTORY_API_URL)が未設定です。デモ用データモードでは、画面にはこの端末で編集可能なサンプルデータを表示します。',
           source,
         });
       } else {
         setHistoryStatus({
-          state: 'unconfigured',
-          message: 'VITE_HISTORY_API_URLが未設定のため、サンプルデータを表示中です。',
+          state: 'error',
+          message: isProduction
+            ? `本番環境モードのため、履歴APIの取得に失敗してもサンプルデータへは切り替えていません。取得できませんでした(${error})。`
+            : `履歴APIへの接続を試みましたが失敗しました(${error})。デモ用データモードでは、画面にはこの端末で編集可能なサンプルデータを表示します(実データへの接続自体は失敗しています)。`,
           source,
         });
       }
     })();
     return () => { cancelled = true; };
-  }, []);
+  }, [isProduction]);
 
   // --- IoT Core(手動テスト) ---
   const [iotStatus, setIotStatus] = useState({ state: 'idle', message: 'まだ確認していません。' });
@@ -239,7 +255,11 @@ export default function ConnectionStatusPage({
           <p style={styles.cardDesc}>{historyStatus.message}</p>
           <dl style={styles.infoList}>
             <Info label="API URL" value={HISTORY_API_URL || '(未設定)'} theme={theme} />
-            <Info label="データソース" value={historyStatus.source === 'api' ? '実データ(API)' : 'サンプルデータ(モック)'} theme={theme} />
+            <Info
+              label="データソース"
+              value={historyStatus.source === 'api' ? '実データ(API)' : '取得できず(未接続/エラー)'}
+              theme={theme}
+            />
           </dl>
         </section>
 
@@ -261,32 +281,63 @@ export default function ConnectionStatusPage({
         </section>
 
         {/* 検出パイプライン(説明文が長いため3列ぶん=全幅を使う) */}
+        {/* 【重要】デモ/本番モード切り替え機能の追加に伴い、この欄の説明文・表示項目も
+            モードに応じて出し分けている。本番環境ではこのブラウザのWebカメラ・Socket.IO
+            送信デモは無効化され、代わりに②のAWS IoT Core接続のみが実際のデータ経路になる
+            ため、旧来のデモ向け文言のまま出し続けると「Webカメラが未接続」等と誤解を招く
+            (実際には意図的に無効化されているだけで異常ではない)ため、mode-awareにした。 */}
         <section style={{ ...styles.card, gridColumn: '1 / -1' }}>
           <div style={styles.cardHeadRow}>
-            <h3 style={styles.cardTitle}>⑤ 検出パイプライン(Webカメラ・見守りサーバー)</h3>
+            <h3 style={styles.cardTitle}>
+              ⑤ 検出パイプライン({isProduction ? 'AWS IoT Core経由' : 'Webカメラ・見守りサーバー'})
+            </h3>
             <StatusBadge state={connected ? 'ok' : 'error'} theme={theme} label={connected ? '接続中' : '未接続'} />
           </div>
-          <p style={styles.cardDesc}>
-            <strong>【重要】</strong>このアプリ(フロントエンド)は、実際のCisco Meraki MVカメラには直接
-            接続していません。カメラ映像のAI解析はRole A(クラウド/AI側)の担当範囲であり、フロントエンドは
-            解析後の結果(IoT Core・履歴API経由)を受け取る想定です。現時点ではその配線が未完了のため、
-            代わりにこのブラウザ自身のWebカメラを見守りサーバー(Socket.IO)へ送信し、動作確認用の
-            検出デモとして使っています。以下はその「Webカメラ ⇔ 見守りサーバー」の接続状況です。
-          </p>
-          <dl style={styles.infoList}>
-            <Info label="見守りサーバー(Socket.IO)" value={connected ? '接続中' : '未接続'} theme={theme} />
-            <Info label="キャプチャモード" value={shouldCapture ? '有効(このタブからカメラ映像を送信)' : '閲覧専用(?view=1等でアクセス中)'} theme={theme} />
-            <Info label="Webカメラ" value={cameraError ? `エラー: ${cameraError}` : (shouldCapture ? '起動中/起動試行済み' : '(閲覧専用のため未起動)')} theme={theme} />
-            <Info
-              label="最終検出データ受信"
-              value={lastPoseAt ? `${Math.round((Date.now() - lastPoseAt) / 1000)}秒前` : 'まだ受信していません'}
-              theme={theme}
-            />
-          </dl>
-          {shouldCapture && (
-            <button style={styles.testBtn} onClick={requestWebcam}>
-              Webカメラを再試行
-            </button>
+          {isProduction ? (
+            <>
+              <p style={styles.cardDesc}>
+                現在は<strong>本番環境モード</strong>です。本番環境ではこのブラウザ自身のWebカメラを
+                見守りサーバー(Socket.IO)へ送信する動作確認用デモは無効化されており、実際のCisco Meraki
+                MVカメラ映像のAI解析結果(Role A担当)を、上記②のAWS IoT Core(MQTT over WebSocket)
+                経由でのみ受信します。ここでの接続状況は②のIoT Core接続状況と連動しています。
+              </p>
+              <dl style={styles.infoList}>
+                <Info label="動作モード" value="本番環境(Webカメラ・Socket.IO送信は無効)" theme={theme} />
+                <Info label="データ経路" value="AWS IoT Core (MQTT over WebSocket)" theme={theme} />
+                <Info
+                  label="最終検出データ受信"
+                  value={lastPoseAt ? `${Math.round((Date.now() - lastPoseAt) / 1000)}秒前` : 'まだ受信していません'}
+                  theme={theme}
+                />
+              </dl>
+            </>
+          ) : (
+            <>
+              <p style={styles.cardDesc}>
+                <strong>【重要】</strong>このアプリ(フロントエンド)は、実際のCisco Meraki MVカメラには直接
+                接続していません。カメラ映像のAI解析はRole A(クラウド/AI側)の担当範囲であり、フロントエンドは
+                解析後の結果(IoT Core・履歴API経由)を受け取る想定です。現時点ではその配線が未完了のため、
+                代わりにこのブラウザ自身のWebカメラを見守りサーバー(Socket.IO)へ送信し、動作確認用の
+                検出デモとして使っています。以下はその「Webカメラ ⇔ 見守りサーバー」の接続状況です(デモ用
+                データモード。ハンバーガーメニューから本番環境モードに切り替えると、上記のIoT Core経由の
+                表示に変わります)。
+              </p>
+              <dl style={styles.infoList}>
+                <Info label="見守りサーバー(Socket.IO)" value={connected ? '接続中' : '未接続'} theme={theme} />
+                <Info label="キャプチャモード" value={shouldCapture ? '有効(このタブからカメラ映像を送信)' : '閲覧専用(?view=1等でアクセス中)'} theme={theme} />
+                <Info label="Webカメラ" value={cameraError ? `エラー: ${cameraError}` : (shouldCapture ? '起動中/起動試行済み' : '(閲覧専用のため未起動)')} theme={theme} />
+                <Info
+                  label="最終検出データ受信"
+                  value={lastPoseAt ? `${Math.round((Date.now() - lastPoseAt) / 1000)}秒前` : 'まだ受信していません'}
+                  theme={theme}
+                />
+              </dl>
+              {shouldCapture && (
+                <button style={styles.testBtn} onClick={requestWebcam}>
+                  Webカメラを再試行
+                </button>
+              )}
+            </>
           )}
         </section>
       </div>
