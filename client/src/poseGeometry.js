@@ -27,7 +27,7 @@ function isValidKpt(k) {
  *   「部屋の設定」「カメラ位置の設定」タブでユーザーが設定した現在の部屋の形/カメラ設置位置・向き。
  *   省略時はconfig.jsの既定値を使う。
  */
-export function analyzePerson(keypoints, roomConfig) {
+export function analyzePerson(keypoints, roomConfig, previousState = null) {
   if (!Array.isArray(keypoints) || keypoints.length === 0) return null;
 
   const visible = keypoints.filter(isValidKpt);
@@ -73,22 +73,32 @@ export function analyzePerson(keypoints, roomConfig) {
     horizontalCompression = Math.max(Math.sqrt(1 - sinTheta * sinTheta), 0.4);
   }
 
+  // --- 動的キャリブレーション（学習済みサイズ）の読み込み ---
+  // 過去のフレームで足元が見えていた時に逆算して学習した個人サイズがあればそれを使い、
+  // なければ一般的な成人の固定値を使う。
+  const learnedShoulderW = previousState?.learnedShoulderW ?? 0.38;
+  const learnedFaceW = previousState?.learnedFaceW ?? 0.14;
+  const learnedEyeW = previousState?.learnedEyeW ?? 0.065;
+  const learnedHeight = previousState?.learnedHeight ?? 1.6;
+
   // 1. 水平幅からの推定（横向き補正を適用）
   if (lShoulder && rShoulder) {
     const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
-    if (px > 10) estimates.push((0.38 * IMG_H) / (2 * px * tanFovY)); // 肩幅 約38cm
+    if (px > 10) estimates.push((learnedShoulderW * IMG_H) / (2 * px * tanFovY));
   }
   if (lEar && rEar) {
     const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
-    if (px > 10) estimates.push((0.14 * IMG_H) / (2 * px * tanFovY)); // 顔幅 約14cm
+    if (px > 10) estimates.push((learnedFaceW * IMG_H) / (2 * px * tanFovY));
   }
   if (lEye && rEye) {
     const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
-    if (px > 10) estimates.push((0.065 * IMG_H) / (2 * px * tanFovY)); // 両目 約6.5cm
+    if (px > 10) estimates.push((learnedEyeW * IMG_H) / (2 * px * tanFovY));
   }
 
   // 2. 垂直方向（見えている部位の割合）からの推定
   // 画面下端で見切れている場合（Y=480付近）はピクセル高さが圧縮されるため除外
+  let estimatedFullHeightPx = null;
+  let verticalCompression = 1.0;
   if (bbox.maxY < IMG_H - 10) {
     let visibleRatio = 1.0;
     if (isValidKpt(keypoints[15]) || isValidKpt(keypoints[16])) visibleRatio = 1.0;
@@ -97,15 +107,14 @@ export function analyzePerson(keypoints, roomConfig) {
     else if (isValidKpt(lShoulder) || isValidKpt(rShoulder)) visibleRatio = 0.25;
     else visibleRatio = 0.15;
 
-    const estimatedFullHeightPx = bboxH / visibleRatio;
-    const PERSON_HEIGHT_M = 1.6; // 一般的な成人の身長
+    estimatedFullHeightPx = bboxH / visibleRatio;
     
     // カメラのピッチ角（上下の傾き）による見かけの高さの圧縮を補正
     // カメラが下（俯瞰）や上（仰瞰）を向いているほど、直立した人物は画面上で短く映る
     const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
     const pitchRad = (pitchDeg * Math.PI) / 180;
-    const verticalCompression = Math.max(Math.cos(pitchRad), 0.3); // 極端な角度でも最低30%は確保
-    const apparentHeightM = PERSON_HEIGHT_M * verticalCompression;
+    verticalCompression = Math.max(Math.cos(pitchRad), 0.3); // 極端な角度でも最低30%は確保
+    const apparentHeightM = learnedHeight * verticalCompression;
 
     const verticalEstimate = (apparentHeightM * IMG_H) / (2 * estimatedFullHeightPx * tanFovY);
     estimates.push(verticalEstimate);
@@ -165,32 +174,42 @@ export function analyzePerson(keypoints, roomConfig) {
   let refX, refY, targetY;
 
   // 下から順に、有効な部位を探す
+  // AIの確信度(Confidence: p[2])を重みとして加重平均することで、
+  // 家具などで隠れかけて不正確になったキーポイントに引っ張られるブレを防ぐ。
+  const getWeightedCenter = (pts) => {
+    const totalWeight = pts.reduce((sum, p) => sum + p[2], 0);
+    return {
+      x: pts.reduce((sum, p) => sum + p[0] * p[2], 0) / totalWeight,
+      y: pts.reduce((sum, p) => sum + p[1] * p[2], 0) / totalWeight,
+    };
+  };
+
   if (isValidKpt(ankleL) || isValidKpt(ankleR)) {
     const pts = [ankleL, ankleR].filter(isValidKpt);
-    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
-    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    const center = getWeightedCenter(pts);
+    refX = center.x; refY = center.y;
     targetY = 0.1; // 足首の高さ(約0.1m)
   } else if (isValidKpt(kneeL) || isValidKpt(kneeR)) {
     const pts = [kneeL, kneeR].filter(isValidKpt);
-    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
-    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    const center = getWeightedCenter(pts);
+    refX = center.x; refY = center.y;
     targetY = 0.5; // 膝の高さ(約0.5m)
   } else if (isValidKpt(hipL) || isValidKpt(hipR)) {
     const pts = [hipL, hipR].filter(isValidKpt);
-    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
-    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    const center = getWeightedCenter(pts);
+    refX = center.x; refY = center.y;
     targetY = 1.0; // 腰の高さ(約1.0m)
   } else if (isValidKpt(lShoulder) || isValidKpt(rShoulder)) {
     const pts = [lShoulder, rShoulder].filter(isValidKpt);
-    refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
-    refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+    const center = getWeightedCenter(pts);
+    refX = center.x; refY = center.y;
     targetY = 1.4; // 肩の高さ(約1.4m)
   } else if (isCloseUp) {
     // 顔しか見えない場合、目の中心を使う
     const pts = [lEye, rEye, lEar, rEar, keypoints[0]].filter(isValidKpt);
     if (pts.length > 0) {
-      refX = pts.reduce((sum, p) => sum + p[0], 0) / pts.length;
-      refY = pts.reduce((sum, p) => sum + p[1], 0) / pts.length;
+      const center = getWeightedCenter(pts);
+      refX = center.x; refY = center.y;
     } else {
       refX = (bbox.minX + bbox.maxX) / 2;
       refY = (bbox.minY + bbox.maxY) / 2;
@@ -202,12 +221,95 @@ export function analyzePerson(keypoints, roomConfig) {
     targetY = 0.0;
   }
 
+  const rawFloor = imageToFloor(refX, refY, roomConfig, targetY, isCloseUp, estimatedDistanceM);
+
+  // --- 動的キャリブレーション（個人サイズの学習） ---
+  let nextState = { ...previousState };
+  // 足元が綺麗に見えていて、レイキャストが正確に行えたフレームでのみ学習する
+  if (rawFloor.isAccurateRaycast && rawFloor.distanceM > 0.5) {
+    // 距離 D から実際のサイズ W_real を逆算: W_real = (2 * W_px * tanFovY * D) / (IMG_H * 1.2)
+    // ※推定時に 1.2 倍の補正をかけているため、逆算時も 1.2 で割ってスケールを合わせる
+    const calcReal = (px) => (2 * px * tanFovY * rawFloor.distanceM) / (IMG_H * 1.2);
+    const alpha = 0.05; // 学習率（急激な変化を防ぐためゆっくり学習させる）
+
+    if (lShoulder && rShoulder) {
+      const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
+      if (px > 10) {
+        const w = calcReal(px);
+        if (w > 0.2 && w < 0.6) nextState.learnedShoulderW = learnedShoulderW * (1 - alpha) + w * alpha;
+      }
+    }
+    if (lEar && rEar) {
+      const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
+      if (px > 10) {
+        const w = calcReal(px);
+        if (w > 0.08 && w < 0.25) nextState.learnedFaceW = learnedFaceW * (1 - alpha) + w * alpha;
+      }
+    }
+    if (lEye && rEye) {
+      const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
+      if (px > 10) {
+        const w = calcReal(px);
+        if (w > 0.04 && w < 0.12) nextState.learnedEyeW = learnedEyeW * (1 - alpha) + w * alpha;
+      }
+    }
+    if (estimatedFullHeightPx) {
+      const h = calcReal(estimatedFullHeightPx) / verticalCompression;
+      if (h > 0.8 && h < 2.2) nextState.learnedHeight = learnedHeight * (1 - alpha) + h * alpha;
+    }
+  }
+
+  // --- 時間的な平滑化（α-βフィルタ：速度を考慮した予測型トラッキング） ---
+  // 単純な移動平均では歩行時に「実際の立ち位置より後ろに遅れる」現象が発生するため、
+  // 移動速度(vx, vz)も学習し、次フレームの位置を予測することで遅れをなくす。
+  let smoothedFloor = { x: rawFloor.x, z: rawFloor.z };
+  let nextVx = previousState?.vx ?? 0;
+  let nextVz = previousState?.vz ?? 0;
+
+  if (previousState?.floor) {
+    const prevFloor = previousState.floor;
+    const dt = 0.3; // 評価間隔の目安(約300ms)
+
+    // 1. 予測ステップ（現在の速度でそのまま進んだと仮定した位置）
+    const predictedX = prevFloor.x + nextVx * dt;
+    const predictedZ = prevFloor.z + nextVz * dt;
+
+    // 2. 観測との差分（イノベーション）
+    const ex = rawFloor.x - predictedX;
+    const ez = rawFloor.z - predictedZ;
+    const dist = Math.sqrt(ex * ex + ez * ez);
+
+    // 1.5m以上一気に移動した場合はワープとみなし、平滑化をリセットする（追従を優先）
+    if (dist < 1.5) {
+      const alpha = 0.4; // 位置の補正ゲイン（高いほど観測値に追従）
+      const beta = 0.2;  // 速度の補正ゲイン（高いほど速度変化に敏感）
+
+      smoothedFloor = {
+        x: predictedX + alpha * ex,
+        z: predictedZ + alpha * ez,
+      };
+      nextVx = nextVx + (beta / dt) * ex;
+      nextVz = nextVz + (beta / dt) * ez;
+      
+      // 速度の減衰（摩擦）を入れて、立ち止まった時に予測が暴走するのを防ぐ
+      nextVx *= 0.8;
+      nextVz *= 0.8;
+    } else {
+      nextVx = 0;
+      nextVz = 0;
+    }
+  }
+  nextState.floor = smoothedFloor;
+  nextState.vx = nextVx;
+  nextState.vz = nextVz;
+
   return {
     avgConf,
     bbox,
     aspectRatio,
     hasLowerBody: isCloseUp ? false : hasLowerBody,
-    floor: imageToFloor(refX, refY, roomConfig, targetY, isCloseUp, estimatedDistanceM),
+    floor: smoothedFloor,
+    state: nextState,
     visibleCount: visible.length,
     keypoints,
     isCloseUp,
@@ -326,6 +428,7 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
   };
 
   let floorDistanceM;
+  let isAccurateRaycast = false;
 
   // カメラから対象ピクセルへ向かうレイが、水平よりも下を向いているか（俯瞰）
   // dir.y が負なら下向き。-0.05 は約3度以上下を向いていることを意味する
@@ -337,6 +440,7 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
     const heightDiff = cameraMount.y - targetY;
     if (heightDiff * dir.y < 0) {
       floorDistanceM = -heightDiff / dir.y;
+      isAccurateRaycast = true; // キャリブレーションの学習に使える信頼できる値
     } else {
       floorDistanceM = estimatedDistanceM !== null ? estimatedDistanceM * dirLen : 0.5;
     }
@@ -359,7 +463,8 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
   const distanceM = Math.min(floorDistanceM, MAX_RAY_DISTANCE_M);
 
   // 交差点(床の上の座標。実際の壁の内側に収まるようクランプ済み)
-  return clampRayToFootprint(distanceM);
+  const pos = clampRayToFootprint(distanceM);
+  return { x: pos.x, z: pos.z, distanceM, isAccurateRaycast };
 }
 
 /** 2つのフロア座標間の距離(メートル) */

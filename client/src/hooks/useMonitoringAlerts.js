@@ -50,6 +50,7 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   const wasVisible = useRef(false);
   const lostFiredAt = useRef(0);
   const lastKnownPositionRef = useRef({ x: null, z: null, time: 0 });
+  const personStatesRef = useRef({}); // { personIndex: state }
 
   // 【重要】poseData/lastPoseAt/connectedは毎フレーム(検出間隔によっては300msより
   // 短い周期で)新しい値になるため、下の評価用setIntervalの依存配列に直接含めると、
@@ -377,7 +378,14 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
       const noRecentPose = !lastPoseAt || now - lastPoseAt > THRESHOLDS.LOST_TIMEOUT_MS;
       const roomConfig = roomConfigRef.current;
       const persons = poseData && Array.isArray(poseData.keypoints)
-        ? poseData.keypoints.map((kpts) => analyzePerson(kpts, roomConfig)).filter(Boolean)
+        ? poseData.keypoints.map((kpts, idx) => {
+            const prevState = personStatesRef.current[idx] || null;
+            const person = analyzePerson(kpts, roomConfig, prevState);
+            if (person) {
+              personStatesRef.current[idx] = person.state;
+            }
+            return person;
+          }).filter(Boolean)
         : [];
       const hasPerson = connected && !noRecentPose && persons.length > 0;
 
@@ -398,6 +406,7 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
         setStatusText(connected ? '検出待ち' : 'サーバー未接続');
         stationaryStartFloor.current = null;
         stationaryStartTime.current = null;
+        personStatesRef.current = {}; // 誰もいなくなったら学習状態と平滑化をリセット
         return;
       }
 
