@@ -45,6 +45,11 @@ export function analyzePerson(keypoints, roomConfig) {
   const bboxH = Math.max(bbox.maxY - bbox.minY, 1);
   const aspectRatio = bboxH / bboxW; // 小さいほど「横たわっている」
 
+  // 下半身（腰、膝、足首）が少なくとも1つ見えているかを確認
+  // 11: L Hip, 12: R Hip, 13: L Knee, 14: R Knee, 15: L Ankle, 16: R Ankle
+  const lowerBodyIndices = [11, 12, 13, 14, 15, 16];
+  const hasLowerBody = lowerBodyIndices.some(i => isValidKpt(keypoints[i]));
+
   // 【精度向上】床の座標を正確に計算するため、人物の「中心」ではなく「足元（接地点）」を基準にする。
   // 足首(15,16) -> 膝(13,14) -> 腰(11,12) -> バウンディングボックス下端 の順でフォールバック。
   const ankleL = keypoints[15];
@@ -73,6 +78,7 @@ export function analyzePerson(keypoints, roomConfig) {
     avgConf,
     bbox,
     aspectRatio,
+    hasLowerBody,
     // 足元を基準にしているため、投影先の高さオフセット(targetY)は0(床面)のままでよい
     floor: imageToFloor(refX, refY, roomConfig, 0),
     visibleCount: visible.length,
