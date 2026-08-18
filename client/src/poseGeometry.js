@@ -398,31 +398,16 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 // しまう誤差がありました。targetYを指定することで、床面ではなく「人物の中心の高さ」
 // の仮想平面との交点を計算し、奥行きのズレを解消します。
 // -------------------------------------------------------------------
-export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = false, estimatedDistanceM = null) {
-  const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
+export function getRayDirection(imgX, imgY, roomConfig) {
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
   const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
   const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
 
-  // 1. 画像座標を正規化デバイス座標 (NDC: -1.0 〜 1.0) に変換
-  // 画像は左上が原点・下方向が+Yのため、ndcYは向きを反転させて
-  // 「画像の上側=+1、下側=-1」になるようにしている(カメラのローカル空間の
-  // 上方向=+Yに合わせるため)。
-  // 【不具合修正】実機で動作確認したところ、前後(奥行き)の表示は正しいが、
-  // 左右が反転して表示されるとの報告があった。前後(pitch/ndcY側)は問題ない
-  // ことから、原因は画像の左右(ndcX)の向きにあると判断し、ndcXの符号を
-  // 反転させた(画像の右側=ndcX+1ではなく、画像の右側=ndcX-1になるようにする)。
   const ndcX = 1 - (imgX / IMG_W) * 2;
   const ndcY = 1 - (imgY / IMG_H) * 2;
-
   const aspect = IMG_W / IMG_H;
   const tanFov = Math.tan(((fovDeg / 2) * Math.PI) / 180);
 
-  // 2. カメラの向き(yaw=左右, pitch=上下)から、ワールド空間での
-  // 前方(forward)・右(right)・上(up)の3本の基底ベクトルを求める。
-  // forward: RoomScene.jsxのpovCameraのdirX/dirY/dirZとまったく同じ式
-  // (yaw=0・pitch=0のとき+Z方向を向き、yawが増えると+X方向へ、pitchが
-  // 増えると下向きへ回転する)。
   const yawRad = (yawDeg * Math.PI) / 180;
   const pitchRad = (pitchDeg * Math.PI) / 180;
   const forward = {
@@ -430,38 +415,31 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
     y: -Math.sin(pitchRad),
     z: Math.cos(yawRad) * Math.cos(pitchRad),
   };
-  // right: 水平面内のみ(カメラは左右に傾く(ロールする)ことは無い前提)。
-  // CameraMount.jsxがyaw分だけY軸回転させた箱・扇形の「右方向」と一致する。
   const right = {
     x: Math.cos(yawRad),
     y: 0,
     z: -Math.sin(yawRad),
   };
-  // up = forward × right (右手系の外積)。pitchで傾いた分だけ、カメラの
-  // 「上」方向も一緒に傾く(カメラのレンズが下を向くほど、上面は前方向へ傾く)。
   const up = {
     x: forward.y * right.z - forward.z * right.y,
     y: forward.z * right.x - forward.x * right.z,
     z: forward.x * right.y - forward.y * right.x,
   };
 
-  // 3. 画像上のピクセル位置(NDC)に応じて、上記の基底ベクトルを合成し、
-  // カメラからそのピクセルの方向へ伸びる実際のレイ(方向ベクトル)を求める
-  // (前方distanceを1とした仮想フィルム面上の点への方向)。
   const rawDir = {
     x: forward.x + right.x * ndcX * aspect * tanFov + up.x * ndcY * tanFov,
     y: forward.y + right.y * ndcX * aspect * tanFov + up.y * ndcY * tanFov,
     z: forward.z + right.z * ndcX * aspect * tanFov + up.z * ndcY * tanFov,
   };
-  // 【重要】rawDirは長さ1のベクトルではない(画像の端に近いピクセルほど、
-  // 仮想フィルム面までの距離が長くなる分だけ長さも伸びる)。そのまま
-  // 「t = -cameraMount.y / rawDir.y」で交差点を求めることはできる(tは
-  // 「rawDirの何倍進んだか」を表すスカラーとして機能する)ものの、下記の
-  // 投影距離クランプ処理は「実際のメートル単位の距離」を扱いたいため、
-  // ここで正規化(長さ1のベクトルに)しておく。正規化後は t がそのまま
-  // カメラからの実距離(メートル)になる。
   const dirLen = Math.hypot(rawDir.x, rawDir.y, rawDir.z) || 1;
-  const dir = { x: rawDir.x / dirLen, y: rawDir.y / dirLen, z: rawDir.z / dirLen };
+  return { x: rawDir.x / dirLen, y: rawDir.y / dirLen, z: rawDir.z / dirLen, dirLen };
+}
+
+export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = false, estimatedDistanceM = null) {
+  const cameraMount = roomConfig?.cameraMount || DEFAULT_CAMERA_MOUNT;
+  const ray = getRayDirection(imgX, imgY, roomConfig);
+  const dir = ray;
+  const dirLen = ray.dirLen;
 
   // 4. レイと指定平面（Y=targetY）の交差判定
   // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(t、メートル)で
