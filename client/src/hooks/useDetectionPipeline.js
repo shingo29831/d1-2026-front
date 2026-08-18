@@ -244,8 +244,19 @@ export function useDetectionPipeline() {
     const handleDisconnect = () => setSocketConnected(false);
     const handlePoseData = (data) => {
       console.log('[useDetectionPipeline] Socket.IOからpose-dataを受信しました:', data);
-      setPoseData(data);
+      
+      // サーバー側が本番のJSONスキーマに合わせて出力するようになったため、
+      // 以前の { keypoints: [...] } 形式を期待している既存コンポーネント
+      // (PersonFigureやYoloCheckPage等) が壊れないよう、detailsの中身をposeDataとしてセットする。
+      const posePayload = data.details ? data.details : data;
+      setPoseData(posePayload);
       setLastPoseAt(Date.now());
+
+      // デモモードでも本番と同じアラート処理(useMonitoringAlerts)を動かすため、
+      // 受信したデータをiotMessageとしてもセットする。
+      if (data.event_type) {
+        setIotMessage({ topic: `child_monitoring/${data.event_type}`, data, timestamp: Date.now() });
+      }
     };
 
     socket.on('connect', handleConnect);
