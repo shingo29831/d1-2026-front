@@ -225,6 +225,7 @@ export default function RoomScene({
           dummy={p.dummy}
           selected={p.selected}
           onSelect={p.onSelect}
+          keypoints={p.keypoints}
         />
       ))}
 

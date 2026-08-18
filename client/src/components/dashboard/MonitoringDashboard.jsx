@@ -423,6 +423,7 @@ export default function MonitoringDashboard({
         floor: resolveSafePosition({ x, z }, { walls: collisionWalls, furniture }),
         fallen: p.aspectRatio < THRESHOLDS.FALL_ASPECT_RATIO,
         colorState: idx === 0 ? colorState : 'normal',
+        keypoints: (poseData && poseData[idx] ? poseData[idx].keypoints : null) || p.keypoints,
       };
     });
 

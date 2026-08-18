@@ -35,13 +35,14 @@ import * as THREE from 'three';
 // 紫系の色で示す(実際の検出結果と見分けられるように)。selectedがtrueの
 // ダミーは矢印キーでの移動対象になっており、リングを強調表示する。
 // onSelectが渡されている場合はクリックでそのダミーを選択できる。
-export default function PersonFigure({ floor, fallen, colorState, dummy, selected, onSelect }) {
+export default function PersonFigure({ floor, fallen, colorState, dummy, selected, onSelect, keypoints }) {
   const group = useRef();
 
   // 歩行アニメーション用の参照(左=0, 右=1)
   const hipRefs = useRef([null, null]);
   const kneeRefs = useRef([null, null]);
   const shoulderRefs = useRef([null, null]);
+  const elbowRefs = useRef([null, null]); // 肘の曲げ用
   const walkPhase = useRef(0);
   const walkAmp = useRef(0);
   const prevGroupPos = useRef(null);
@@ -86,30 +87,177 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
     // 進行方向を向く: 実際に移動した向き(dx, dz)から目標角度を求め、最短経路で
     // 滑らかに回転させる(角度の境界±πをまたぐときに逆回転しないよう正規化する)。
     // 止まっている間(移動がほぼ無い間)は最後に向いていた方向を保持する。
+    let currentTwist = 0;
     if (isWalking) {
       const targetHeading = Math.atan2(dx, dz);
       let diff = targetHeading - heading.current;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // [-π, π]に正規化
       heading.current += diff * 0.2;
+    } else if (!dummy && keypoints && keypoints.length >= 17) {
+      // 立ち止まっている間は、鼻と両肩(または両目)の位置関係から身体のひねり(左右の向き)を推定する
+      // 確信度の閾値を少し下げ(0.3)、見えにくい状態でもできるだけ反応させる
+      const getKpt = (idx) => (keypoints[idx] && keypoints[idx][2] > 0.3 ? keypoints[idx] : null);
+      const ls = getKpt(5), rs = getKpt(6), nose = getKpt(0);
+      const leye = getKpt(1), reye = getKpt(2);
+      
+      if (ls && rs && nose) {
+        const shoulderCenter = (ls[0] + rs[0]) / 2;
+        const shoulderWidth = Math.abs(ls[0] - rs[0]);
+        if (shoulderWidth > 10) {
+          // 鼻が両肩の中心からどれくらいズレているか(-1: 左端, 1: 右端)
+          const offset = (nose[0] - shoulderCenter) / (shoulderWidth / 2);
+          const clampedOffset = THREE.MathUtils.clamp(offset, -1, 1);
+          // 単眼カメラでは手前/奥の区別が難しいため、最後に歩いていた方向を
+          // 基準として、そこからの左右のひねり角度(asin)として適用する
+          currentTwist = Math.asin(clampedOffset);
+        }
+      } else if (leye && reye && nose) {
+        // 肩が見えないドアップ時は、両目と鼻の位置関係から顔の向き(=体の向き)を推定する
+        const eyeCenter = (leye[0] + reye[0]) / 2;
+        const eyeWidth = Math.abs(leye[0] - reye[0]);
+        if (eyeWidth > 10) {
+          const offset = (nose[0] - eyeCenter) / (eyeWidth / 2);
+          const clampedOffset = THREE.MathUtils.clamp(offset, -1, 1);
+          currentTwist = Math.asin(clampedOffset);
+        }
+      }
     }
-    group.current.rotation.y = heading.current;
+    
+    // 目標の向きへ滑らかに回転させる
+    const targetRotationY = heading.current + currentTwist;
+    let rotDiff = targetRotationY - group.current.rotation.y;
+    rotDiff = Math.atan2(Math.sin(rotDiff), Math.cos(rotDiff));
+    group.current.rotation.y += rotDiff * 0.2;
 
     // 立ち姿の基準角度(度ではなくラジアン。以前の静止姿勢と同じ値)
     const HIP_BASE = 0.08;
     const KNEE_BASE = -0.12;
     const SHOULDER_BASE = 0.1;
+    const ELBOW_BASE = 0.35; // 前腕の初期X回転
 
+    let targetHipX = [HIP_BASE, HIP_BASE];
+    let targetKneeX = [KNEE_BASE, KNEE_BASE];
+    let targetShoulderX = [SHOULDER_BASE, SHOULDER_BASE];
+    let targetShoulderZ = [-0.32, 0.32]; // 左, 右の初期Z回転
+    let targetElbowX = [ELBOW_BASE, ELBOW_BASE];
+
+    // --- キーポイントからの姿勢抽出 (停止中のみ適用) ---
+    // YOLOの2D座標(画像平面)から、腕の上がり具合や膝の曲がり具合を簡易的に計算し、
+    // 3Dモデルの関節角度(FK)にマッピングする。
+    if (!dummy && keypoints && keypoints.length >= 17 && !isWalking) {
+      const getKpt = (idx) => (keypoints[idx] && keypoints[idx][2] > 0.4 ? keypoints[idx] : null);
+      const ls = getKpt(5), rs = getKpt(6);
+      const le = getKpt(7), re = getKpt(8);
+      const lw = getKpt(9), rw = getKpt(10);
+      const lh = getKpt(11), rh = getKpt(12);
+      const la = getKpt(15), ra = getKpt(16);
+
+      // 右腕 (i=1)
+      if (rs && rw) {
+        const dx = rw[0] - rs[0];
+        const dy = rw[1] - rs[1]; // 画像座標はY下向き
+        const angle = Math.atan2(dy, dx);
+        const angleFromDown = angle - Math.PI / 2; // 下向き(π/2)を基準(0)とする
+        
+        // 腕を横に上げる動き(Z軸)と前に上げる動き(X軸)に分配
+        targetShoulderZ[1] = 0.32 - angleFromDown * 0.8;
+        targetShoulderX[1] = SHOULDER_BASE - Math.abs(angleFromDown) * 0.3;
+
+        // 肘の曲がり具合 (肩〜肘と肘〜手首の角度差)
+        if (re) {
+          const a1 = Math.atan2(re[1] - rs[1], re[0] - rs[0]);
+          const a2 = Math.atan2(rw[1] - re[1], rw[0] - re[0]);
+          let diff = a2 - a1;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          targetElbowX[1] = ELBOW_BASE - Math.abs(diff) * 0.8;
+        }
+      }
+
+      // 左腕 (i=0)
+      if (ls && lw) {
+        const dx = lw[0] - ls[0];
+        const dy = lw[1] - ls[1];
+        let normAngle = Math.atan2(dy, dx);
+        if (normAngle < 0) normAngle += Math.PI * 2;
+        const angleFromDown = normAngle - Math.PI / 2;
+        
+        targetShoulderZ[0] = -0.32 - angleFromDown * 0.8;
+        targetShoulderX[0] = SHOULDER_BASE - Math.abs(angleFromDown) * 0.3;
+
+        if (le) {
+          const a1 = Math.atan2(le[1] - ls[1], le[0] - ls[0]);
+          const a2 = Math.atan2(lw[1] - le[1], lw[0] - le[0]);
+          let diff = a2 - a1;
+          while (diff > Math.PI) diff -= Math.PI * 2;
+          while (diff < -Math.PI) diff += Math.PI * 2;
+          targetElbowX[0] = ELBOW_BASE - Math.abs(diff) * 0.8;
+        }
+      }
+
+      // 右脚 (i=1)
+      if (rh && ra) {
+        const dist = Math.hypot(ra[0] - rh[0], ra[1] - rh[1]);
+        const bodyLen = (rs && rh) ? Math.hypot(rh[0] - rs[0], rh[1] - rs[1]) : 100;
+        if (bodyLen > 0) {
+          const ratio = dist / bodyLen;
+          // 2D画像上で脚が胴体に対して短い場合、膝を曲げている(または前に出ている)と判定
+          if (ratio < 1.2) {
+            const bend = Math.max(0, 1.2 - ratio) * 1.5;
+            targetKneeX[1] = KNEE_BASE - bend;
+            targetHipX[1] = HIP_BASE + bend * 0.5;
+          }
+        }
+      }
+
+      // 左脚 (i=0)
+      if (lh && la) {
+        const dist = Math.hypot(la[0] - lh[0], la[1] - lh[1]);
+        const bodyLen = (ls && lh) ? Math.hypot(lh[0] - ls[0], lh[1] - lh[1]) : 100;
+        if (bodyLen > 0) {
+          const ratio = dist / bodyLen;
+          if (ratio < 1.2) {
+            const bend = Math.max(0, 1.2 - ratio) * 1.5;
+            targetKneeX[0] = KNEE_BASE - bend;
+            targetHipX[0] = HIP_BASE + bend * 0.5;
+          }
+        }
+      }
+    }
+
+    // --- 歩行アニメーション (移動中) ---
+    if (isWalking || walkAmp.current > 0.01) {
+      [0, 1].forEach((i) => {
+        const phaseOffset = i === 0 ? 0 : Math.PI; // 左右の脚は逆位相で振る
+        const legSwing = Math.sin(phase + phaseOffset) * 0.45 * amp;
+        const kneeLift = Math.max(0, Math.sin(phase + phaseOffset + 0.6)) * 0.55 * amp;
+        targetHipX[i] = HIP_BASE + legSwing;
+        targetKneeX[i] = KNEE_BASE - kneeLift;
+
+        // 腕は対側の脚と同位相で振る
+        const armPhaseOffset = i === 0 ? Math.PI : 0;
+        const armSwing = Math.sin(phase + armPhaseOffset) * 0.35 * amp;
+        targetShoulderX[i] = SHOULDER_BASE + armSwing;
+        targetShoulderZ[i] = i === 0 ? -0.32 : 0.32; // 歩行中は腕を下ろす
+        targetElbowX[i] = ELBOW_BASE;
+      });
+    }
+
+    // --- 目標角度へ滑らかに追従 (lerp) ---
     [0, 1].forEach((i) => {
-      const phaseOffset = i === 0 ? 0 : Math.PI; // 左右の脚は逆位相で振る
-      const legSwing = Math.sin(phase + phaseOffset) * 0.45 * amp;
-      const kneeLift = Math.max(0, Math.sin(phase + phaseOffset + 0.6)) * 0.55 * amp;
-      if (hipRefs.current[i]) hipRefs.current[i].rotation.x = HIP_BASE + legSwing;
-      if (kneeRefs.current[i]) kneeRefs.current[i].rotation.x = KNEE_BASE - kneeLift;
-
-      // 腕は対側の脚と同位相で振る(右脚が前に出るとき左腕が前に出る、自然な歩行動作)
-      const armPhaseOffset = i === 0 ? Math.PI : 0;
-      const armSwing = Math.sin(phase + armPhaseOffset) * 0.35 * amp;
-      if (shoulderRefs.current[i]) shoulderRefs.current[i].rotation.x = SHOULDER_BASE + armSwing;
+      if (hipRefs.current[i]) {
+        hipRefs.current[i].rotation.x = THREE.MathUtils.lerp(hipRefs.current[i].rotation.x, targetHipX[i], 0.15);
+      }
+      if (kneeRefs.current[i]) {
+        kneeRefs.current[i].rotation.x = THREE.MathUtils.lerp(kneeRefs.current[i].rotation.x, targetKneeX[i], 0.15);
+      }
+      if (shoulderRefs.current[i]) {
+        shoulderRefs.current[i].rotation.x = THREE.MathUtils.lerp(shoulderRefs.current[i].rotation.x, targetShoulderX[i], 0.15);
+        shoulderRefs.current[i].rotation.z = THREE.MathUtils.lerp(shoulderRefs.current[i].rotation.z, targetShoulderZ[i], 0.15);
+      }
+      if (elbowRefs.current[i]) {
+        elbowRefs.current[i].rotation.x = THREE.MathUtils.lerp(elbowRefs.current[i].rotation.x, targetElbowX[i], 0.15);
+      }
     });
 
     // 上下の弾み: 1歩ごと(1サイクルにつき2回)に重心がわずかに上下する様子を
@@ -211,7 +359,11 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
               <meshStandardMaterial {...bodyMat} />
             </mesh>
             {/* 前腕〜手(肘から下。内側へ軽く曲げる) */}
-            <group position={[0, -0.17, 0]} rotation={[0.35, 0, 0.15 * side]}>
+            <group 
+              ref={(el) => { elbowRefs.current[i] = el; }}
+              position={[0, -0.17, 0]} 
+              rotation={[0.35, 0, 0.15 * side]}
+            >
               <mesh position={[0, -0.09, 0]} castShadow>
                 <capsuleGeometry args={[0.038, 0.13, 4, 10]} />
                 <meshStandardMaterial {...bodyMat} />
