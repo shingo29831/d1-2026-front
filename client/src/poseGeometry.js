@@ -82,15 +82,20 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   const learnedHeight = previousState?.learnedHeight ?? 1.6;
 
   // 1. 水平幅からの推定（横向き補正を適用）
-  if (lShoulder && rShoulder) {
+  // 画面端で見切れている部位は、キーポイントが実際の幅より内側に寄って検出され、
+  // 距離が遠く誤推定される原因になるため除外する。
+  const edgeMargin = 15;
+  const isInside = (kpt) => kpt && kpt[0] > edgeMargin && kpt[0] < IMG_W - edgeMargin && kpt[1] > edgeMargin && kpt[1] < IMG_H - edgeMargin;
+
+  if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
     const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
     if (px > 10) estimates.push((learnedShoulderW * IMG_H) / (2 * px * tanFovY));
   }
-  if (lEar && rEar) {
+  if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
     const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
     if (px > 10) estimates.push((learnedFaceW * IMG_H) / (2 * px * tanFovY));
   }
-  if (lEye && rEye) {
+  if (lEye && rEye && isInside(lEye) && isInside(rEye)) {
     const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
     if (px > 10) estimates.push((learnedEyeW * IMG_H) / (2 * px * tanFovY));
   }
@@ -233,21 +238,21 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     // ※推定時に 1.2 倍の補正をかけているため、逆算時も 1.2 で割ってスケールを合わせる
     const calcReal = (px) => (2 * px * tanFovY * rawFloor.distanceM) / (IMG_H * 1.2);
 
-    if (lShoulder && rShoulder) {
+    if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
       const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
       if (px > 10) {
         const w = calcReal(px);
         if (w > 0.2 && w < 0.6) nextState.learnedShoulderW = learnedShoulderW * (1 - alpha) + w * alpha;
       }
     }
-    if (lEar && rEar) {
+    if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
       const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
       if (px > 10) {
         const w = calcReal(px);
         if (w > 0.08 && w < 0.25) nextState.learnedFaceW = learnedFaceW * (1 - alpha) + w * alpha;
       }
     }
-    if (lEye && rEye) {
+    if (lEye && rEye && isInside(lEye) && isInside(rEye)) {
       const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
       if (px > 10) {
         const w = calcReal(px);
@@ -265,12 +270,12 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     let referenceDistance = null;
     
     // 最も安定している肩幅を基準にする
-    if (lShoulder && rShoulder) {
+    if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
       const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
       if (px > 10) referenceDistance = (learnedShoulderW * IMG_H) / (2 * px * tanFovY);
     } 
     // 肩が見えなければ顔幅を基準にする
-    else if (lEar && rEar) {
+    else if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
       const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
       if (px > 10) referenceDistance = (learnedFaceW * IMG_H) / (2 * px * tanFovY);
     }
@@ -280,15 +285,15 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
       const calcReal = (px) => (2 * px * tanFovY * referenceDistance) / IMG_H;
 
       // 肩幅が基準の場合、顔と目を学習
-      if (lShoulder && rShoulder) {
-        if (lEar && rEar) {
+      if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
+        if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
           const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
           if (px > 10) {
             const w = calcReal(px);
             if (w > 0.08 && w < 0.25) nextState.learnedFaceW = learnedFaceW * (1 - alpha) + w * alpha;
           }
         }
-        if (lEye && rEye) {
+        if (lEye && rEye && isInside(lEye) && isInside(rEye)) {
           const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
           if (px > 10) {
             const w = calcReal(px);
@@ -297,8 +302,8 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
         }
       }
       // 顔幅が基準の場合、目を学習
-      else if (lEar && rEar) {
-        if (lEye && rEye) {
+      else if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
+        if (lEye && rEye && isInside(lEye) && isInside(rEye)) {
           const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
           if (px > 10) {
             const w = calcReal(px);
@@ -315,11 +320,11 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   }
 
   // --- 最大ピクセルサイズの記録（大きく表示された時の基準化用） ---
-  if (lEar && rEar) {
+  if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
     const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
     nextState.maxFacePx = Math.max(nextState.maxFacePx || 0, px);
   }
-  if (lShoulder && rShoulder) {
+  if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
     const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
     nextState.maxShoulderPx = Math.max(nextState.maxShoulderPx || 0, px);
   }
