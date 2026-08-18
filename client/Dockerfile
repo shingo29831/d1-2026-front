@@ -27,6 +27,6 @@ ENV VITE_AWS_REGION=$VITE_AWS_REGION \
     VITE_IOT_ENDPOINT=$VITE_IOT_ENDPOINT \
     VITE_HISTORY_API_URL=$VITE_HISTORY_API_URL
 
-EXPOSE 5173
+EXPOSE 80
 
-CMD ["npm", "run", "dev", "--", "--host"]
+CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "80"]
