@@ -74,16 +74,19 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
     const beforePos = group.current.position.clone();
     group.current.position.lerp(target, 0.25);
 
-    // このフレームで実際にどれだけ動いたか(=歩行中かどうかの判定に使う)
+    // このフレームで実際にどれだけ動いたか(進行方向の計算等に使う)
     const moved = prevGroupPos.current ? group.current.position.distanceTo(prevGroupPos.current) : 0;
     const dx = group.current.position.x - beforePos.x;
     const dz = group.current.position.z - beforePos.z;
     prevGroupPos.current = group.current.position.clone();
     
-    // 歩行判定にヒステリシスを持たせる(YOLOの微小な座標ブレによるチャタリング防止)
-    if (moved > 0.004) {
+    // 歩行判定: 1フレームの移動量ではなく「目標位置(floor)までの残り距離」で判定する。
+    // YOLOの検出枠が数センチぶれても歩行モーション(腕振り)が誤発動しないよう、
+    // 15cm以上離れたら歩き始め、5cm以内に近づいたら止まるという大きな遊びを持たせる。
+    const distToTarget = beforePos.distanceTo(target);
+    if (distToTarget > 0.15) {
       isWalkingRef.current = true;
-    } else if (moved < 0.0015) {
+    } else if (distToTarget < 0.05) {
       isWalkingRef.current = false;
     }
     const isWalking = !fallen && isWalkingRef.current;
