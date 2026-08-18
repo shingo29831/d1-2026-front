@@ -6,7 +6,7 @@ export default defineConfig({
   server: {
     proxy: {
       '/socket.io/': {
-        target: 'http://server:5000', // docker-compose内のサーバーコンテナ名:ポート
+        target: 'http://server:3001',
         ws: true,
         changeOrigin: true
       }
