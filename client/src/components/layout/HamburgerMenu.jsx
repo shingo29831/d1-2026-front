@@ -120,17 +120,20 @@ export default function HamburgerMenu({ currentPage, onNavigate, connected, embe
               送って検出する、これまで通りのプロトタイプ動作。
             ・本番: 仕様書(Role A/Role C)通り、カメラ映像の取得・AI推論はエッジ
               (EC2)側が行い、このフロントエンドはWebカメラを一切使用せず、AWS IoT
-              CoreからのMQTT受信のみで動作する「閲覧専用」になる。 */}
-        <button
-          onClick={toggleOperationMode}
-          style={{ ...styles.themeToggle, ...(isProduction ? styles.modeToggleActive : {}) }}
-          title={isProduction
-            ? '本番環境モード: 仕様書(Role A/Role C)通り、カメラ映像の取得・AI推論はエッジ(EC2)側で行い、このフロントエンドはAWS IoT CoreからのMQTT受信のみを行う閲覧専用になります。'
-            : 'デモ用データモード: この端末のWebカメラ映像をサーバーへ送って検出する、これまで通りのプロトタイプ動作です。'}
-        >
-          {isProduction ? '🏭 本番環境(仕様書準拠)' : '🧪 デモ用データ'}
-          <span style={styles.themeToggleHint}>クリックで切り替え</span>
-        </button>
+              CoreからのMQTT受信のみで動作する「閲覧専用」になる。
+            ※本番ビルド(PROD)時は常に本番環境モードとして動作するため、切り替えボタンは表示しない。 */}
+        {!import.meta.env.PROD && (
+          <button
+            onClick={toggleOperationMode}
+            style={{ ...styles.themeToggle, ...(isProduction ? styles.modeToggleActive : {}) }}
+            title={isProduction
+              ? '本番環境モード: 仕様書(Role A/Role C)通り、カメラ映像の取得・AI推論はエッジ(EC2)側で行い、このフロントエンドはAWS IoT CoreからのMQTT受信のみを行う閲覧専用になります。'
+              : 'デモ用データモード: この端末のWebカメラ映像をサーバーへ送って検出する、これまで通りのプロトタイプ動作です。'}
+          >
+            {isProduction ? '🏭 本番環境(仕様書準拠)' : '🧪 デモ用データ'}
+            <span style={styles.themeToggleHint}>クリックで切り替え</span>
+          </button>
+        )}
 
         {/* 利用者画面/管理画面のタブ切り替え */}
         <div style={styles.groupTabs}>
