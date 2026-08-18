@@ -1,6 +1,7 @@
 import React, { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
+import { useRoomConfig } from '../../roomConfigContext';
 
 // フロア座標上に人物を表す、頭・胴体・腕(上腕/前腕/手)・脚(太もも/すね/足)を
 // 個別のパーツで組み立てたリアル寄りの人型アバターを描画する。
@@ -37,6 +38,7 @@ import * as THREE from 'three';
 // onSelectが渡されている場合はクリックでそのダミーを選択できる。
 export default function PersonFigure({ floor, fallen, colorState, dummy, selected, onSelect, keypoints }) {
   const group = useRef();
+  const { cameraMount } = useRoomConfig();
 
   // 歩行アニメーション用の参照(左=0, 右=1)
   const hipRefs = useRef([null, null]);
@@ -48,6 +50,16 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
   const prevGroupPos = useRef(null);
   const heading = useRef(0); // 現在向いている角度(rotation.y)。停止中は最後の値を保持する
   const bodyPivot = useRef(); // 前のめり姿勢・上下の弾みを適用する内側グループ
+
+  // 歩行判定のチャタリング防止と、キーポイント欠損時の姿勢保持用
+  const isWalkingRef = useRef(false);
+  const targetAngles = useRef({
+    hipX: [0.08, 0.08],
+    kneeX: [-0.12, -0.12],
+    shoulderX: [0.1, 0.1],
+    shoulderZ: [-0.32, 0.32],
+    elbowX: [0.35, 0.35]
+  });
 
   const color = dummy
     ? (selected ? '#a78bfa' : '#8b5cf6')
@@ -67,7 +79,14 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
     const dx = group.current.position.x - beforePos.x;
     const dz = group.current.position.z - beforePos.z;
     prevGroupPos.current = group.current.position.clone();
-    const isWalking = !fallen && moved > 0.0008;
+    
+    // 歩行判定にヒステリシスを持たせる(YOLOの微小な座標ブレによるチャタリング防止)
+    if (moved > 0.004) {
+      isWalkingRef.current = true;
+    } else if (moved < 0.0015) {
+      isWalkingRef.current = false;
+    }
+    const isWalking = !fallen && isWalkingRef.current;
 
     // 歩き出す/止まるときに振幅を滑らかに0↔1へ補間(急な足踏み開始/停止を防ぐ)
     walkAmp.current = THREE.MathUtils.lerp(walkAmp.current, isWalking ? 1 : 0, 0.12);
@@ -87,44 +106,78 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
     // 進行方向を向く: 実際に移動した向き(dx, dz)から目標角度を求め、最短経路で
     // 滑らかに回転させる(角度の境界±πをまたぐときに逆回転しないよう正規化する)。
     // 止まっている間(移動がほぼ無い間)は最後に向いていた方向を保持する。
-    let currentTwist = 0;
+    let targetRotationY = heading.current;
+
     if (isWalking) {
       const targetHeading = Math.atan2(dx, dz);
       let diff = targetHeading - heading.current;
       diff = Math.atan2(Math.sin(diff), Math.cos(diff)); // [-π, π]に正規化
       heading.current += diff * 0.2;
-    } else if (!dummy && keypoints && keypoints.length >= 17) {
-      // 立ち止まっている間は、鼻と両肩(または両目)の位置関係から身体のひねり(左右の向き)を推定する
+      targetRotationY = heading.current;
+    } else if (!dummy && keypoints && keypoints.length >= 17 && cameraMount) {
+      // 立ち止まっている間は、YOLOのキーポイントとカメラ位置から身体の向きを推定する
       // 確信度の閾値を少し下げ(0.3)、見えにくい状態でもできるだけ反応させる
       const getKpt = (idx) => (keypoints[idx] && keypoints[idx][2] > 0.3 ? keypoints[idx] : null);
       const ls = getKpt(5), rs = getKpt(6), nose = getKpt(0);
       const leye = getKpt(1), reye = getKpt(2);
       
+      // カメラから人物への角度 (Z+が0, X+が+π/2)
+      const camDx = floor.x - cameraMount.x;
+      const camDz = floor.z - cameraMount.z;
+      const camToPersonAngle = Math.atan2(camDx, camDz);
+
+      let estimatedAngle = null;
+
       if (ls && rs && nose) {
         const shoulderCenter = (ls[0] + rs[0]) / 2;
+        const isFront = ls[0] > rs[0]; // 左肩が画面右側にあれば正面向き
         const shoulderWidth = Math.abs(ls[0] - rs[0]);
+        
         if (shoulderWidth > 10) {
           // 鼻が両肩の中心からどれくらいズレているか(-1: 左端, 1: 右端)
           const offset = (nose[0] - shoulderCenter) / (shoulderWidth / 2);
           const clampedOffset = THREE.MathUtils.clamp(offset, -1, 1);
-          // 単眼カメラでは手前/奥の区別が難しいため、最後に歩いていた方向を
-          // 基準として、そこからの左右のひねり角度(asin)として適用する
-          currentTwist = Math.asin(clampedOffset);
+          const twist = Math.asin(clampedOffset);
+          
+          if (isFront) {
+            // 正面向き: 基本はカメラを見つめ返す角度(camToPersonAngle + π)
+            // offsetが正(鼻が画面右) -> 人物から見て左を向いている -> +twist
+            estimatedAngle = camToPersonAngle + Math.PI + twist;
+          } else {
+            // 背面向き: 基本はカメラから遠ざかる角度(camToPersonAngle)
+            // offsetが正(鼻が画面右) -> 人物から見て右を向いている -> -twist
+            estimatedAngle = camToPersonAngle - twist;
+          }
         }
       } else if (leye && reye && nose) {
         // 肩が見えないドアップ時は、両目と鼻の位置関係から顔の向き(=体の向き)を推定する
         const eyeCenter = (leye[0] + reye[0]) / 2;
+        const isFront = leye[0] > reye[0]; // 左目が画面右側にあれば正面向き
         const eyeWidth = Math.abs(leye[0] - reye[0]);
+        
         if (eyeWidth > 10) {
           const offset = (nose[0] - eyeCenter) / (eyeWidth / 2);
           const clampedOffset = THREE.MathUtils.clamp(offset, -1, 1);
-          currentTwist = Math.asin(clampedOffset);
+          const twist = Math.asin(clampedOffset);
+          
+          if (isFront) {
+            estimatedAngle = camToPersonAngle + Math.PI + twist;
+          } else {
+            estimatedAngle = camToPersonAngle - twist;
+          }
         }
+      }
+
+      if (estimatedAngle !== null) {
+        // 停止中の推定角度を heading.current に滑らかに反映させる
+        let diff = estimatedAngle - heading.current;
+        diff = Math.atan2(Math.sin(diff), Math.cos(diff));
+        heading.current += diff * 0.1; // 歩行時より少しゆっくり追従
+        targetRotationY = heading.current;
       }
     }
     
     // 目標の向きへ滑らかに回転させる
-    const targetRotationY = heading.current + currentTwist;
     let rotDiff = targetRotationY - group.current.rotation.y;
     rotDiff = Math.atan2(Math.sin(rotDiff), Math.cos(rotDiff));
     group.current.rotation.y += rotDiff * 0.2;
@@ -135,17 +188,27 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
     const SHOULDER_BASE = 0.1;
     const ELBOW_BASE = 0.35; // 前腕の初期X回転
 
-    let targetHipX = [HIP_BASE, HIP_BASE];
-    let targetKneeX = [KNEE_BASE, KNEE_BASE];
-    let targetShoulderX = [SHOULDER_BASE, SHOULDER_BASE];
-    let targetShoulderZ = [-0.32, 0.32]; // 左, 右の初期Z回転
-    let targetElbowX = [ELBOW_BASE, ELBOW_BASE];
+    let targetHipX = [...targetAngles.current.hipX];
+    let targetKneeX = [...targetAngles.current.kneeX];
+    let targetShoulderX = [...targetAngles.current.shoulderX];
+    let targetShoulderZ = [...targetAngles.current.shoulderZ];
+    let targetElbowX = [...targetAngles.current.elbowX];
+
+    // 基本姿勢へゆっくり戻す(キーポイント欠損時の滑らかな復帰)
+    for (let i = 0; i < 2; i++) {
+      targetHipX[i] = THREE.MathUtils.lerp(targetHipX[i], HIP_BASE, 0.05);
+      targetKneeX[i] = THREE.MathUtils.lerp(targetKneeX[i], KNEE_BASE, 0.05);
+      targetShoulderX[i] = THREE.MathUtils.lerp(targetShoulderX[i], SHOULDER_BASE, 0.05);
+      targetShoulderZ[i] = THREE.MathUtils.lerp(targetShoulderZ[i], i === 0 ? -0.32 : 0.32, 0.05);
+      targetElbowX[i] = THREE.MathUtils.lerp(targetElbowX[i], ELBOW_BASE, 0.05);
+    }
 
     // --- キーポイントからの姿勢抽出 (停止中のみ適用) ---
     // YOLOの2D座標(画像平面)から、腕の上がり具合や膝の曲がり具合を簡易的に計算し、
     // 3Dモデルの関節角度(FK)にマッピングする。
     if (!dummy && keypoints && keypoints.length >= 17 && !isWalking) {
-      const getKpt = (idx) => (keypoints[idx] && keypoints[idx][2] > 0.4 ? keypoints[idx] : null);
+      // 確信度の閾値を少し下げ(0.3)、バンザイ時など手首が見えにくくなっても粘り強く追従させる
+      const getKpt = (idx) => (keypoints[idx] && keypoints[idx][2] > 0.3 ? keypoints[idx] : null);
       const ls = getKpt(5), rs = getKpt(6);
       const le = getKpt(7), re = getKpt(8);
       const lw = getKpt(9), rw = getKpt(10);
@@ -156,21 +219,29 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
       if (rs && rw) {
         const dx = rw[0] - rs[0];
         const dy = rw[1] - rs[1]; // 画像座標はY下向き
-        const angle = Math.atan2(dy, dx);
-        const angleFromDown = angle - Math.PI / 2; // 下向き(π/2)を基準(0)とする
-        
-        // 腕を横に上げる動き(Z軸)と前に上げる動き(X軸)に分配
-        targetShoulderZ[1] = 0.32 - angleFromDown * 0.8;
-        targetShoulderX[1] = SHOULDER_BASE - Math.abs(angleFromDown) * 0.3;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 5) {
+          // 下向きを0、上向きをπとする角度 (0 〜 π)
+          const upAngle = Math.acos(THREE.MathUtils.clamp(dy / dist, -1, 1));
+          const targetX = SHOULDER_BASE - upAngle * 0.8;
+          const sideRatio = Math.abs(dx) / dist;
+          const targetZ = 0.32 - sideRatio * 1.5;
+          // 即座に反映させるが、1フレームのノイズを和らげるため0.5でlerp
+          targetShoulderX[1] = THREE.MathUtils.lerp(targetShoulderX[1], targetX, 0.5);
+          targetShoulderZ[1] = THREE.MathUtils.lerp(targetShoulderZ[1], targetZ, 0.5);
+        }
 
         // 肘の曲がり具合 (肩〜肘と肘〜手首の角度差)
         if (re) {
-          const a1 = Math.atan2(re[1] - rs[1], re[0] - rs[0]);
-          const a2 = Math.atan2(rw[1] - re[1], rw[0] - re[0]);
+          const dx1 = re[0] - rs[0], dy1 = re[1] - rs[1];
+          const dx2 = rw[0] - re[0], dy2 = rw[1] - re[1];
+          const a1 = Math.atan2(dy1, dx1);
+          const a2 = Math.atan2(dy2, dx2);
           let diff = a2 - a1;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          targetElbowX[1] = ELBOW_BASE - Math.abs(diff) * 0.8;
+          const targetElbow = ELBOW_BASE - Math.abs(diff) * 0.8;
+          targetElbowX[1] = THREE.MathUtils.lerp(targetElbowX[1], targetElbow, 0.5);
         }
       }
 
@@ -178,20 +249,26 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
       if (ls && lw) {
         const dx = lw[0] - ls[0];
         const dy = lw[1] - ls[1];
-        let normAngle = Math.atan2(dy, dx);
-        if (normAngle < 0) normAngle += Math.PI * 2;
-        const angleFromDown = normAngle - Math.PI / 2;
-        
-        targetShoulderZ[0] = -0.32 - angleFromDown * 0.8;
-        targetShoulderX[0] = SHOULDER_BASE - Math.abs(angleFromDown) * 0.3;
+        const dist = Math.hypot(dx, dy);
+        if (dist > 5) {
+          const upAngle = Math.acos(THREE.MathUtils.clamp(dy / dist, -1, 1));
+          const targetX = SHOULDER_BASE - upAngle * 0.8;
+          const sideRatio = Math.abs(dx) / dist;
+          const targetZ = -0.32 + sideRatio * 1.5;
+          targetShoulderX[0] = THREE.MathUtils.lerp(targetShoulderX[0], targetX, 0.5);
+          targetShoulderZ[0] = THREE.MathUtils.lerp(targetShoulderZ[0], targetZ, 0.5);
+        }
 
         if (le) {
-          const a1 = Math.atan2(le[1] - ls[1], le[0] - ls[0]);
-          const a2 = Math.atan2(lw[1] - le[1], lw[0] - le[0]);
+          const dx1 = le[0] - ls[0], dy1 = le[1] - ls[1];
+          const dx2 = lw[0] - le[0], dy2 = lw[1] - le[1];
+          const a1 = Math.atan2(dy1, dx1);
+          const a2 = Math.atan2(dy2, dx2);
           let diff = a2 - a1;
           while (diff > Math.PI) diff -= Math.PI * 2;
           while (diff < -Math.PI) diff += Math.PI * 2;
-          targetElbowX[0] = ELBOW_BASE - Math.abs(diff) * 0.8;
+          const targetElbow = ELBOW_BASE - Math.abs(diff) * 0.8;
+          targetElbowX[0] = THREE.MathUtils.lerp(targetElbowX[0], targetElbow, 0.5);
         }
       }
 
@@ -204,8 +281,8 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
           // 2D画像上で脚が胴体に対して短い場合、膝を曲げている(または前に出ている)と判定
           if (ratio < 1.2) {
             const bend = Math.max(0, 1.2 - ratio) * 1.5;
-            targetKneeX[1] = KNEE_BASE - bend;
-            targetHipX[1] = HIP_BASE + bend * 0.5;
+            targetKneeX[1] = THREE.MathUtils.lerp(targetKneeX[1], KNEE_BASE - bend, 0.5);
+            targetHipX[1] = THREE.MathUtils.lerp(targetHipX[1], HIP_BASE + bend * 0.5, 0.5);
           }
         }
       }
@@ -218,8 +295,8 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
           const ratio = dist / bodyLen;
           if (ratio < 1.2) {
             const bend = Math.max(0, 1.2 - ratio) * 1.5;
-            targetKneeX[0] = KNEE_BASE - bend;
-            targetHipX[0] = HIP_BASE + bend * 0.5;
+            targetKneeX[0] = THREE.MathUtils.lerp(targetKneeX[0], KNEE_BASE - bend, 0.5);
+            targetHipX[0] = THREE.MathUtils.lerp(targetHipX[0], HIP_BASE + bend * 0.5, 0.5);
           }
         }
       }
@@ -242,6 +319,14 @@ export default function PersonFigure({ floor, fallen, colorState, dummy, selecte
         targetElbowX[i] = ELBOW_BASE;
       });
     }
+
+    targetAngles.current = {
+      hipX: targetHipX,
+      kneeX: targetKneeX,
+      shoulderX: targetShoulderX,
+      shoulderZ: targetShoulderZ,
+      elbowX: targetElbowX
+    };
 
     // --- 目標角度へ滑らかに追従 (lerp) ---
     [0, 1].forEach((i) => {
