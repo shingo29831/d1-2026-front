@@ -12,6 +12,8 @@ import {
   DEFAULT_ZONES,
   DEFAULT_WALLS,
   DEFAULT_DOOR_SENSORS,
+  CAMERA_RESOLUTIONS,
+  DEFAULT_CAMERA_RESOLUTION,
 } from './config';
 import { footprintBounds } from './roomShapes';
 import { saveCustomModel, loadCustomModel, clearCustomModel } from './idbModelStore';
@@ -80,6 +82,7 @@ export function RoomConfigProvider({ children }) {
   const [cameraFovDeg, setCameraFovDegState] = useState(saved?.cameraFovDeg ?? DEFAULT_FOV_DEG);
   const [cameraRangeM, setCameraRangeMState] = useState(saved?.cameraRangeM ?? DEFAULT_RANGE_M);
   const [cameraMode, setCameraModeState] = useState(saved?.cameraMode || 'free');
+  const [cameraResolution, setCameraResolutionState] = useState(saved?.cameraResolution || DEFAULT_CAMERA_RESOLUTION);
   const [furniture, setFurnitureState] = useState(
     Array.isArray(saved?.furniture) ? saved.furniture : DEFAULT_FURNITURE,
   );
@@ -155,6 +158,7 @@ export function RoomConfigProvider({ children }) {
       if (next.cameraFovDeg != null) setCameraFovDegState(next.cameraFovDeg);
       if (next.cameraRangeM != null) setCameraRangeMState(next.cameraRangeM);
       if (next.cameraMode) setCameraModeState(next.cameraMode);
+      if (next.cameraResolution) setCameraResolutionState(next.cameraResolution);
       if (Array.isArray(next.furniture)) setFurnitureState(next.furniture);
       if (Array.isArray(next.zones)) setZonesState(next.zones);
       if (Array.isArray(next.doorSensors)) setDoorSensorsState(next.doorSensors);
@@ -267,6 +271,11 @@ export function RoomConfigProvider({ children }) {
   const setCameraRange = useCallback((m) => {
     setCameraRangeMState(m);
     persist({ cameraRangeM: m });
+  }, [persist]);
+
+  const setCameraResolution = useCallback((res) => {
+    setCameraResolutionState(res);
+    persist({ cameraResolution: res });
   }, [persist]);
 
   const setFurnitureList = useCallback((nextFurniture) => {
@@ -409,6 +418,7 @@ export function RoomConfigProvider({ children }) {
     setCameraFovDegState(DEFAULT_FOV_DEG);
     setCameraRangeMState(DEFAULT_RANGE_M);
     setCameraModeState('free');
+    setCameraResolutionState(DEFAULT_CAMERA_RESOLUTION);
     try { window.localStorage.removeItem(STORAGE_KEY); } catch { /* noop */ }
   }, []);
 
@@ -424,6 +434,7 @@ export function RoomConfigProvider({ children }) {
     cameraFovDeg,
     cameraRangeM,
     cameraMode,
+    cameraResolution,
     furniture,
     zones,
     walls,
@@ -438,6 +449,7 @@ export function RoomConfigProvider({ children }) {
     setCameraPitch,
     setCameraFov,
     setCameraRange,
+    setCameraResolution,
     addFurniture,
     updateFurniture,
     removeFurniture,
@@ -466,15 +478,16 @@ export function RoomConfigProvider({ children }) {
       cameraFovDeg: DEFAULT_FOV_DEG,
       cameraRangeM: DEFAULT_RANGE_M,
       cameraHeight: CAMERA_HEIGHT_M,
+      cameraResolution: DEFAULT_CAMERA_RESOLUTION,
       furniture: DEFAULT_FURNITURE,
       zones: DEFAULT_ZONES,
       walls: DEFAULT_WALLS,
       doorSensors: DEFAULT_DOOR_SENSORS,
     },
   }), [
-    shape, roomSize, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, furniture, zones, walls, doorSensors,
+    shape, roomSize, height, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, cameraResolution, furniture, zones, walls, doorSensors,
     customModelUrl, customModelName, modelLoading, modelError,
-    setRoomShape, setRoomHeight, setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange,
+    setRoomShape, setRoomHeight, setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange, setCameraResolution,
     addFurniture, updateFurniture, removeFurniture, addZone, updateZone, removeZone, resetFurnitureAndZones,
     addDoorSensor, updateDoorSensor, removeDoorSensor, resetDoorSensors,
     setWallsList, addWall, updateWall, removeWall, resetWalls,

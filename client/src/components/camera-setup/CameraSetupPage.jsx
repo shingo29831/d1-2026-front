@@ -5,6 +5,7 @@ import { useTheme } from '../../themeContext';
 import { footprintBounds, nearestEdgePoint, normalToYawDeg, yawDegToDir } from '../../roomShapes';
 import { useViewport } from '../../hooks/useViewport';
 import InfoButton from '../common/InfoButton';
+import { CAMERA_RESOLUTIONS } from '../../config';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -39,8 +40,8 @@ function clamp(v, lo, hi) {
 // 受けてcameraRangeM(roomConfigContext.jsx)として独立に調整できるようにした。
 export default function CameraSetupPage() {
   const {
-    footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, zones,
-    setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange, defaults,
+    footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, cameraResolution, zones,
+    setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange, setCameraResolution, defaults,
   } = useRoomConfig();
   const { theme } = useTheme();
   const { isMobile } = useViewport();
@@ -51,6 +52,7 @@ export default function CameraSetupPage() {
   const [draftFov, setDraftFov] = useState(cameraFovDeg);
   const [draftRange, setDraftRange] = useState(cameraRangeM);
   const [draftMode, setDraftMode] = useState(cameraMode || 'wall');
+  const [draftResolution, setDraftResolution] = useState(cameraResolution);
   const [saved, setSaved] = useState(false);
   const [previewMode, setPreviewMode] = useState('overview');
 
@@ -174,11 +176,18 @@ export default function CameraSetupPage() {
     setDraftRange(Number(value));
   };
 
+  const handleResolutionChange = (value) => {
+    setSaved(false);
+    const res = CAMERA_RESOLUTIONS.find(r => `${r.width}x${r.height}` === value);
+    if (res) setDraftResolution(res);
+  };
+
   const handleSave = () => {
     setCameraPlacement(draftMount, draftYaw, draftMode);
     setCameraPitch(draftPitch);
     setCameraFov(draftFov);
     setCameraRange(draftRange);
+    setCameraResolution(draftResolution);
     setSaved(true);
   };
 
@@ -189,10 +198,12 @@ export default function CameraSetupPage() {
     setDraftFov(defaults.cameraFovDeg);
     setDraftRange(defaults.cameraRangeM);
     setDraftMode('wall');
+    setDraftResolution(defaults.cameraResolution);
     setCameraPlacement(defaults.cameraMount, defaults.cameraYawDeg, 'wall');
     setCameraPitch(defaults.cameraPitchDeg);
     setCameraFov(defaults.cameraFovDeg);
     setCameraRange(defaults.cameraRangeM);
+    setCameraResolution(defaults.cameraResolution);
     setSaved(false);
   };
 
@@ -334,6 +345,20 @@ export default function CameraSetupPage() {
             </div>
 
             <div style={s.fieldRow}>
+              <span style={s.fieldLabel}>解像度</span>
+              <select
+                value={`${draftResolution.width}x${draftResolution.height}`}
+                onChange={(e) => handleResolutionChange(e.target.value)}
+                style={s.select}
+              >
+                {CAMERA_RESOLUTIONS.map(r => (
+                  <option key={`${r.width}x${r.height}`} value={`${r.width}x${r.height}`}>{r.label}</option>
+                ))}
+              </select>
+            </div>
+            <p style={s.hint}>実際のカメラの解像度に合わせて設定してください。解像度が異なると距離の計算がずれる原因になります。</p>
+
+            <div style={s.fieldRow}>
               <span style={s.fieldLabel}>高さ</span>
               <input
                 type="range" min={HEIGHT_LIMITS.min} max={HEIGHT_LIMITS.max} step={HEIGHT_LIMITS.step}
@@ -418,6 +443,7 @@ function makeStyles(theme, isMobile) {
     fieldRow: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 },
     fieldLabel: { width: 48, fontSize: 13.5, color: theme.textMuted },
     range: { flex: 1 },
+    select: { flex: 1, padding: '6px 8px', borderRadius: 6, border: `1px solid ${theme.borderSoft}`, background: theme.panelBg, color: theme.text },
     unit: { fontSize: 13, color: theme.accent, width: 48, textAlign: 'right' },
     btnRow: { display: 'flex', gap: 10, marginTop: 16 },
     primaryBtn: { padding: '10px 18px', fontSize: 13.5, fontWeight: 700, background: theme.accent, color: theme.mode === 'dark' ? '#04222a' : '#ffffff', border: `1px solid ${theme.accentBorder}`, borderRadius: 8, cursor: 'pointer' },

@@ -13,21 +13,6 @@ import { footprintBounds, pointInPolygon } from './roomShapes';
 // 部屋のフロア座標(メートル, 部屋中心付近が原点)への簡易マッピングを行うユーティリティ。
 // ===================================================================
 
-let IMG_W = 640;
-let IMG_H = 480;
-
-function updateResolution(x, y) {
-  // 受信した座標からカメラの解像度を動的に推定・更新する
-  if (x > 1920 || y > 1080) {
-    IMG_W = 2560;
-    IMG_H = 1440;
-  } else if (x > 1280 || y > 720) {
-    if (IMG_W < 2560) { IMG_W = 1920; IMG_H = 1080; }
-  } else if (x > 640 || y > 480) {
-    if (IMG_W < 1920) { IMG_W = 1280; IMG_H = 720; }
-  }
-}
-
 function isValidKpt(k) {
   return Array.isArray(k) && k.length >= 3 && k[2] > CONF_THRESHOLD;
 }
@@ -35,8 +20,8 @@ function isValidKpt(k) {
 /**
  * 1人分の生キーポイント配列から、扱いやすい特徴量にまとめる。
  * @param {Array} keypoints - 17個の[x,y,conf]配列
- * @param {{footprint:Array<{x:number,z:number}>, cameraMount:{x:number,y:number,z:number}, cameraYawDeg:number}} [roomConfig]
- *   「部屋の設定」「カメラ位置の設定」タブでユーザーが設定した現在の部屋の形/カメラ設置位置・向き。
+ * @param {{footprint:Array<{x:number,z:number}>, cameraMount:{x:number,y:number,z:number}, cameraYawDeg:number, cameraResolution:{width:number,height:number}}} [roomConfig]
+ *   「部屋の設定」「カメラ位置の設定」タブでユーザーが設定した現在の部屋の形/カメラ設置位置・向き・解像度。
  *   省略時はconfig.jsの既定値を使う。
  */
 export function analyzePerson(keypoints, roomConfig, previousState = null) {
@@ -45,14 +30,13 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   const visible = keypoints.filter(isValidKpt);
   if (visible.length === 0) return null;
 
+  const imgW = roomConfig?.cameraResolution?.width ?? 640;
+  const imgH = roomConfig?.cameraResolution?.height ?? 480;
+
   const avgConf = visible.reduce((sum, k) => sum + k[2], 0) / visible.length;
 
   const xs = visible.map((k) => k[0]);
   const ys = visible.map((k) => k[1]);
-  const maxX = Math.max(...xs);
-  const maxY = Math.max(...ys);
-  updateResolution(maxX, maxY);
-
   const bbox = {
     minX: Math.min(...xs), maxX: Math.max(...xs),
     minY: Math.min(...ys), maxY: Math.max(...ys),
@@ -90,8 +74,8 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 
   const isCloseUp = faceWidthForCloseUp > 80 || 
                     (faces.length > 0 && bodies.length === 0) ||
-                    (bboxW > IMG_W * 0.6) || 
-                    (bboxH > IMG_H * 0.8);
+                    (bboxW > imgW * 0.6) || 
+                    (bboxH > imgH * 0.8);
 
   // --- 体の向き（横向き）による見かけの幅の圧縮補正 ---
   // 鼻が両肩の中央にあれば正面、どちらかに寄っていれば横を向いていると判定する
@@ -122,23 +106,23 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   // 画面端で見切れている部位は、キーポイントが実際の幅より内側に寄って検出され、
   // 距離が遠く誤推定される原因になるため除外する。
   const edgeMargin = 15;
-  const isInside = (kpt) => kpt && kpt[0] > edgeMargin && kpt[0] < IMG_W - edgeMargin && kpt[1] > edgeMargin && kpt[1] < IMG_H - edgeMargin;
+  const isInside = (kpt) => kpt && kpt[0] > edgeMargin && kpt[0] < imgW - edgeMargin && kpt[1] > edgeMargin && kpt[1] < imgH - edgeMargin;
 
   if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
     const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
-    if (px > 10) estimates.push((learnedShoulderW * IMG_H) / (2 * px * tanFovY));
+    if (px > 10) estimates.push((learnedShoulderW * imgH) / (2 * px * tanFovY));
   }
   if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
     const px = Math.abs(lHip[0] - rHip[0]) / horizontalCompression;
-    if (px > 10) estimates.push((learnedHipW * IMG_H) / (2 * px * tanFovY));
+    if (px > 10) estimates.push((learnedHipW * imgH) / (2 * px * tanFovY));
   }
   if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
     const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
-    if (px > 10) estimates.push((learnedFaceW * IMG_H) / (2 * px * tanFovY));
+    if (px > 10) estimates.push((learnedFaceW * imgH) / (2 * px * tanFovY));
   }
   if (lEye && rEye && isInside(lEye) && isInside(rEye)) {
     const px = Math.abs(lEye[0] - rEye[0]) / horizontalCompression;
-    if (px > 10) estimates.push((learnedEyeW * IMG_H) / (2 * px * tanFovY));
+    if (px > 10) estimates.push((learnedEyeW * imgH) / (2 * px * tanFovY));
   }
 
   // 2. 垂直方向（見えている部位の割合）からの推定
@@ -147,7 +131,7 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   // 全身の高さ推定に大きく影響し、距離が遠くへ飛んでしまう原因になるため除外する。
   let estimatedFullHeightPx = null;
   let verticalCompression = 1.0;
-  if (bbox.maxY < IMG_H - 10 && !isCloseUp && (lShoulder || rShoulder)) {
+  if (bbox.maxY < imgH - 10 && !isCloseUp && (lShoulder || rShoulder)) {
     let visibleRatio = 1.0;
     if (isValidKpt(keypoints[15]) || isValidKpt(keypoints[16])) visibleRatio = 1.0;
     else if (isValidKpt(keypoints[13]) || isValidKpt(keypoints[14])) visibleRatio = 0.75;
@@ -163,7 +147,7 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     verticalCompression = Math.max(Math.cos(pitchRad), 0.3); // 極端な角度でも最低30%は確保
     const apparentHeightM = learnedHeight * verticalCompression;
 
-    const verticalEstimate = (apparentHeightM * IMG_H) / (2 * estimatedFullHeightPx * tanFovY);
+    const verticalEstimate = (apparentHeightM * imgH) / (2 * estimatedFullHeightPx * tanFovY);
     estimates.push(verticalEstimate);
   }
 
@@ -176,7 +160,7 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     // ドアップ状態で耳や目が見切れて estimates が空になった場合でも、
     // 画面の大部分を占めている（至近距離である）ことは確実なため、
     // バウンディングボックスの幅から強制的に至近距離を算出するセーフティネット。
-    const fallbackEstimate = (learnedFaceW * IMG_H) / (2 * bboxW * tanFovY);
+    const fallbackEstimate = (learnedFaceW * imgH) / (2 * bboxW * tanFovY);
     estimatedDistanceM = fallbackEstimate * 1.2;
   }
 
@@ -262,9 +246,9 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 
   // 1. 絶対スケールの学習（足元が綺麗に見えていて、レイキャストが正確な場合）
   if (rawFloor.isAccurateRaycast && rawFloor.distanceM > 0.5) {
-    // 距離 D から実際のサイズ W_real を逆算: W_real = (2 * W_px * tanFovY * D) / (IMG_H * 1.2)
+    // 距離 D から実際のサイズ W_real を逆算: W_real = (2 * W_px * tanFovY * D) / (imgH * 1.2)
     // ※推定時に 1.2 倍の補正をかけているため、逆算時も 1.2 で割ってスケールを合わせる
-    const calcReal = (px) => (2 * px * tanFovY * rawFloor.distanceM) / (IMG_H * 1.2);
+    const calcReal = (px) => (2 * px * tanFovY * rawFloor.distanceM) / (imgH * 1.2);
 
     if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
       const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
@@ -307,22 +291,22 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     // 最も安定している肩幅を基準にする
     if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
       const px = Math.abs(lShoulder[0] - rShoulder[0]) / horizontalCompression;
-      if (px > 10) referenceDistance = (learnedShoulderW * IMG_H) / (2 * px * tanFovY);
+      if (px > 10) referenceDistance = (learnedShoulderW * imgH) / (2 * px * tanFovY);
     } 
     // 肩が見えなければ腰幅を基準にする
     else if (lHip && rHip && isInside(lHip) && isInside(rHip)) {
       const px = Math.abs(lHip[0] - rHip[0]) / horizontalCompression;
-      if (px > 10) referenceDistance = (learnedHipW * IMG_H) / (2 * px * tanFovY);
+      if (px > 10) referenceDistance = (learnedHipW * imgH) / (2 * px * tanFovY);
     }
     // 腰も見えなければ顔幅を基準にする
     else if (lEar && rEar && isInside(lEar) && isInside(rEar)) {
       const px = Math.abs(lEar[0] - rEar[0]) / horizontalCompression;
-      if (px > 10) referenceDistance = (learnedFaceW * IMG_H) / (2 * px * tanFovY);
+      if (px > 10) referenceDistance = (learnedFaceW * imgH) / (2 * px * tanFovY);
     }
 
     if (referenceDistance !== null) {
       // 基準距離から他のパーツの実際のサイズを逆算（ここでは1.2倍補正は不要）
-      const calcReal = (px) => (2 * px * tanFovY * referenceDistance) / IMG_H;
+      const calcReal = (px) => (2 * px * tanFovY * referenceDistance) / imgH;
 
       // 肩幅が基準の場合、腰と顔と目を学習
       if (lShoulder && rShoulder && isInside(lShoulder) && isInside(rShoulder)) {
@@ -463,7 +447,7 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 }
 
 // -------------------------------------------------------------------
-// 画像座標(640x480) → 部屋のフロア座標(メートル, 部屋中心付近が原点) への変換。
+// 画像座標(640x480等) → 部屋のフロア座標(メートル, 部屋中心付近が原点) への変換。
 //
 // 【精度向上】透視投影（レイキャスト）モデルへのアップグレード
 // 以前の「画像の上下位置を部屋の奥行き割合にマッピングする」簡易近似を廃止し、
@@ -480,14 +464,16 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 // の仮想平面との交点を計算し、奥行きのズレを解消します。
 // -------------------------------------------------------------------
 export function getRayDirection(imgX, imgY, roomConfig) {
-  updateResolution(imgX, imgY);
+  const imgW = roomConfig?.cameraResolution?.width ?? 640;
+  const imgH = roomConfig?.cameraResolution?.height ?? 480;
+
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
   const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
   const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
 
-  const ndcX = 1 - (imgX / IMG_W) * 2;
-  const ndcY = 1 - (imgY / IMG_H) * 2;
-  const aspect = IMG_W / IMG_H;
+  const ndcX = 1 - (imgX / imgW) * 2;
+  const ndcY = 1 - (imgY / imgH) * 2;
+  const aspect = imgW / imgH;
   const tanFov = Math.tan(((fovDeg / 2) * Math.PI) / 180);
 
   const yawRad = (yawDeg * Math.PI) / 180;
