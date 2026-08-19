@@ -353,15 +353,19 @@ export default function HistoryPage() {
               まとめてある(絞り込み結果はヒートマップ・3D棒グラフ・一覧すべてに
               即反映される)。【2026-08-19変更】「絞り込みは履歴一覧につけてほしい」
               というご要望を受け、以前はヒートマップの上に独立して置いていたこの
-              絞り込みバーを、履歴一覧セクションの中(見出しの直下)へ移動した。 */}
+              絞り込みバーを、履歴一覧セクションの中(見出しの直下)へ移動した。
+              【2026-08-19further変更】「履歴一覧の絞り込みもモーダル化してほしい」
+              というご要望を受け、キーワード・期間・種類・エリアの詳細な絞り込み
+              項目は、この場でインライン展開するのをやめてモーダルで表示するように
+              変更した。件数サマリ・リセットボタンはこの場に残し、絞り込みボタンを
+              押すとモーダルが開く。 */}
           <section style={s.filterBar}>
             <div style={s.filterBarHeader}>
               <button
                 style={s.filterToggleBtn}
-                onClick={() => setFilterOpen((v) => !v)}
-                aria-expanded={filterOpen}
+                onClick={() => setFilterOpen(true)}
               >
-                <span style={{ ...s.filterToggleChevron, transform: filterOpen ? 'rotate(90deg)' : 'none' }}>▸</span>
+                <span style={s.filterToggleChevron}>▸</span>
                 絞り込み
               </button>
               <span style={s.filterSummary}>
@@ -369,110 +373,128 @@ export default function HistoryPage() {
               </span>
               <button style={s.resetBtn} onClick={resetAllFilters}>絞り込みをリセット</button>
             </div>
+          </section>
 
-            {filterOpen && (
-              <>
-                <div style={s.filterRow}>
-                  <span style={s.filterRowLabel}>キーワード</span>
-                  <input
-                    type="text"
-                    value={searchText}
-                    onChange={(e) => setSearchText(e.target.value)}
-                    placeholder="発生内容で検索(例: 転倒、キッチン)"
-                    style={s.searchInput}
-                  />
+          {filterOpen && (
+            <div style={s.filterModalOverlay} onClick={() => setFilterOpen(false)}>
+              <div style={s.filterModalCard} onClick={(e) => e.stopPropagation()}>
+                <div style={s.filterModalHeaderRow}>
+                  <span style={s.filterModalTitle}>絞り込み</span>
+                  <button style={s.filterModalCloseBtn} onClick={() => setFilterOpen(false)} aria-label="閉じる">✕</button>
                 </div>
-
-                <div style={s.filterRow}>
-                  <span style={s.filterRowLabel}>期間</span>
-                  <div style={s.filterTabs}>
-                    {DATE_RANGES.map((r) => (
-                      <button
-                        key={r.key}
-                        onClick={() => setDateRangeKey(r.key)}
-                        style={{ ...s.filterTab, ...(dateRangeKey === r.key ? s.filterTabActive : {}) }}
-                      >
-                        {r.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div style={s.filterRow}>
-                  <span style={s.filterRowLabel}>種類</span>
-                  <div style={s.filterTabs}>
-                    <button
-                      onClick={selectAllCategories}
-                      style={{ ...s.filterTab, ...(allSelected ? s.filterTabActive : {}) }}
-                    >
-                      すべて({allIncidents.length})
-                    </button>
-                    {GROUPS.map((g) => (
-                      <button
-                        key={g.key}
-                        onClick={() => selectOnlyGroup(g.categories)}
-                        style={{ ...s.filterTab, ...(isGroupActive(g.categories) ? s.filterTabActive : {}) }}
-                        title={`${g.label}の履歴だけを表示`}
-                      >
-                        {g.label}のみ({groupCounts[g.key] || 0})
-                      </button>
-                    ))}
-                    {CATEGORIES.map((cat) => (
-                      <button
-                        key={cat.key}
-                        onClick={() => toggleCategory(cat.key)}
-                        style={{
-                          ...s.filterTab,
-                          ...(selectedCategories.has(cat.key) ? s.filterTabActive : s.filterTabOff),
-                        }}
-                      >
-                        <span style={{ ...s.filterDot, background: cat.color }} />
-                        {cat.label}({categoryCounts[cat.key] || 0})
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {zoneList.length > 0 && (
+                <div style={s.filterModalBody}>
                   <div style={s.filterRow}>
-                    <span style={s.filterRowLabel}>エリア</span>
+                    <span style={s.filterRowLabel}>キーワード</span>
+                    <input
+                      type="text"
+                      value={searchText}
+                      onChange={(e) => setSearchText(e.target.value)}
+                      placeholder="発生内容で検索(例: 転倒、キッチン)"
+                      style={s.searchInput}
+                    />
+                  </div>
+
+                  <div style={s.filterRow}>
+                    <span style={s.filterRowLabel}>期間</span>
                     <div style={s.filterTabs}>
-                      <button
-                        onClick={selectAllAreas}
-                        style={{ ...s.filterTab, ...(selectedAreaId === null ? s.filterTabActive : {}) }}
-                      >
-                        すべてのエリア({allIncidents.length})
-                      </button>
-                      {zoneList.map((zone) => (
+                      {DATE_RANGES.map((r) => (
                         <button
-                          key={zone.id}
-                          onClick={() => setSelectedAreaId(zone.id)}
-                          style={{
-                            ...s.filterTab,
-                            ...(selectedAreaId === zone.id ? s.filterTabActive : {}),
-                          }}
-                          title={`「${zone.label}」の範囲内で発生した履歴だけを表示`}
+                          key={r.key}
+                          onClick={() => setDateRangeKey(r.key)}
+                          style={{ ...s.filterTab, ...(dateRangeKey === r.key ? s.filterTabActive : {}) }}
                         >
-                          <span style={{ ...s.filterDot, background: zone.type === 'danger' ? '#f43f5e' : '#f59e0b' }} />
-                          {zone.label}({areaCounts[zone.id] || 0})
+                          {r.label}
                         </button>
                       ))}
-                      <button
-                        onClick={() => setSelectedAreaId(OUTSIDE_AREA_ID)}
-                        style={{
-                          ...s.filterTab,
-                          ...(selectedAreaId === OUTSIDE_AREA_ID ? s.filterTabActive : {}),
-                        }}
-                        title="どのエリアの範囲にも入っていない履歴だけを表示"
-                      >
-                        エリア外({areaCounts[OUTSIDE_AREA_ID] || 0})
-                      </button>
                     </div>
                   </div>
-                )}
-              </>
-            )}
-          </section>
+
+                  <div style={s.filterRow}>
+                    <span style={s.filterRowLabel}>種類</span>
+                    <div style={s.filterTabs}>
+                      <button
+                        onClick={selectAllCategories}
+                        style={{ ...s.filterTab, ...(allSelected ? s.filterTabActive : {}) }}
+                      >
+                        すべて({allIncidents.length})
+                      </button>
+                      {GROUPS.map((g) => (
+                        <button
+                          key={g.key}
+                          onClick={() => selectOnlyGroup(g.categories)}
+                          style={{ ...s.filterTab, ...(isGroupActive(g.categories) ? s.filterTabActive : {}) }}
+                          title={`${g.label}の履歴だけを表示`}
+                        >
+                          {g.label}のみ({groupCounts[g.key] || 0})
+                        </button>
+                      ))}
+                      {CATEGORIES.map((cat) => (
+                        <button
+                          key={cat.key}
+                          onClick={() => toggleCategory(cat.key)}
+                          style={{
+                            ...s.filterTab,
+                            ...(selectedCategories.has(cat.key) ? s.filterTabActive : s.filterTabOff),
+                          }}
+                        >
+                          <span style={{ ...s.filterDot, background: cat.color }} />
+                          {cat.label}({categoryCounts[cat.key] || 0})
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {zoneList.length > 0 && (
+                    <div style={s.filterRow}>
+                      <span style={s.filterRowLabel}>エリア</span>
+                      <div style={s.filterTabs}>
+                        <button
+                          onClick={selectAllAreas}
+                          style={{ ...s.filterTab, ...(selectedAreaId === null ? s.filterTabActive : {}) }}
+                        >
+                          すべてのエリア({allIncidents.length})
+                        </button>
+                        {zoneList.map((zone) => (
+                          <button
+                            key={zone.id}
+                            onClick={() => setSelectedAreaId(zone.id)}
+                            style={{
+                              ...s.filterTab,
+                              ...(selectedAreaId === zone.id ? s.filterTabActive : {}),
+                            }}
+                            title={`「${zone.label}」の範囲内で発生した履歴だけを表示`}
+                          >
+                            <span style={{ ...s.filterDot, background: zone.type === 'danger' ? '#f43f5e' : '#f59e0b' }} />
+                            {zone.label}({areaCounts[zone.id] || 0})
+                          </button>
+                        ))}
+                        <button
+                          onClick={() => setSelectedAreaId(OUTSIDE_AREA_ID)}
+                          style={{
+                            ...s.filterTab,
+                            ...(selectedAreaId === OUTSIDE_AREA_ID ? s.filterTabActive : {}),
+                          }}
+                          title="どのエリアの範囲にも入っていない履歴だけを表示"
+                        >
+                          エリア外({areaCounts[OUTSIDE_AREA_ID] || 0})
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+                <div style={s.filterModalFooter}>
+                  {/* resetBtnは元々filterBarHeader内(最後の要素)で使うためmarginLeft:'auto'
+                      が付いているが、このフッターでは先頭に置くのでここだけ打ち消し、
+                      代わりにfilterModalDoneBtn側のmarginLeft:'auto'で右寄せしている
+                      (リセットは左、表示ボタンは右、という一般的なモーダルの配置)。 */}
+                  <button style={{ ...s.resetBtn, marginLeft: 0 }} onClick={resetAllFilters}>絞り込みをリセット</button>
+                  <button style={s.filterModalDoneBtn} onClick={() => setFilterOpen(false)}>
+                    {incidents.length}件を表示
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <p style={s.desc}>
             上の絞り込みバーで指定した条件に一致する履歴を、発生日時の新しい順に表示します。
@@ -719,13 +741,18 @@ function makeStyles(theme, isMobile) {
       maxWidth: 1100, fontSize: 12.5, fontWeight: 600, color: theme.danger, marginTop: -10, marginBottom: 18,
       lineHeight: 1.6,
     },
-    statRow: { display: 'flex', gap: 14, marginBottom: 24, flexWrap: 'wrap' },
+    // 【2026-08-19further変更】「件数などは1行に表示されるように」というご要望を
+    // 受け、モバイル時は3枚のカードが折り返さず必ず1行に収まるよう、
+    // flexWrapを止めてflex:1で均等割りし、paddingとフォントサイズも縮小した
+    // (幅120pxのminWidthのままだと375px幅の画面では折り返してしまっていた)。
+    statRow: { display: 'flex', gap: isMobile ? 8 : 14, marginBottom: 24, flexWrap: isMobile ? 'nowrap' : 'wrap' },
     statCard: {
-      minWidth: 120, padding: '12px 18px', borderRadius: 12, background: theme.panelBg,
+      minWidth: isMobile ? 0 : 120, flex: isMobile ? '1 1 0' : '0 0 auto',
+      padding: isMobile ? '10px 6px' : '12px 18px', borderRadius: 12, background: theme.panelBg,
       border: `1px solid ${theme.border}`, textAlign: 'center',
     },
-    statNum: { fontSize: 26, fontWeight: 800, color: theme.textStrong, lineHeight: 1.2 },
-    statLabel: { fontSize: 11.5, color: theme.textFaint, marginTop: 2 },
+    statNum: { fontSize: isMobile ? 20 : 26, fontWeight: 800, color: theme.textStrong, lineHeight: 1.2 },
+    statLabel: { fontSize: isMobile ? 10.5 : 11.5, color: theme.textFaint, marginTop: 2, whiteSpace: 'nowrap' },
     grid: { display: 'flex', gap: isMobile ? 16 : 24, flexWrap: 'wrap', alignItems: 'flex-start' },
     // スマホ幅では固定580pxだと画面からはみ出すため、画面幅いっぱいに広げる
     // (2枚のカードは横並びをやめ、gridのflexWrapによって自然に縦積みになる)。
@@ -748,6 +775,71 @@ function makeStyles(theme, isMobile) {
     resetBtn: {
       marginLeft: 'auto', fontSize: 12, color: theme.accent, background: 'transparent',
       border: `1px solid ${theme.accentBorder}`, borderRadius: 7, padding: '6px 12px', cursor: 'pointer',
+    },
+    // 【2026-08-19further変更】「履歴一覧の絞り込みもモーダル化してほしい」という
+    // ご要望への対応。InfoButton.jsx/NotificationModal.jsxと同じ「画面中央に
+    // 表示する共通モーダル」の見た目・構造をそのまま踏襲している。
+    // 【重要】このページは3D棒グラフ(IncidentBarChart3D.jsx)を持ち、そこでも
+    // @react-three/dreiの<Html>ラベルが既定で非常に大きなzIndex
+    // (zIndexRange既定値[16777271, 0])を自前で持つため、通常のzIndex:1000
+    // のままだと3Dラベルがこのモーダルより手前に表示されてしまう
+    // (NotificationModal.jsx/InfoButton.jsxと同じ原因・同じ対処)。
+    filterModalOverlay: {
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.5)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: 16,
+      zIndex: 100000000,
+    },
+    filterModalCard: {
+      width: '100%',
+      maxWidth: 480,
+      maxHeight: '80vh',
+      background: theme.panelBgAlt,
+      borderRadius: 16,
+      display: 'flex',
+      flexDirection: 'column',
+      overflow: 'hidden',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
+    },
+    filterModalHeaderRow: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      padding: '14px 16px',
+      borderBottom: `1px solid ${theme.border}`,
+      flexShrink: 0,
+    },
+    filterModalTitle: { color: theme.textStrong, fontWeight: 700, fontSize: 15 },
+    filterModalCloseBtn: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      border: 'none',
+      background: 'transparent',
+      color: theme.textMuted,
+      fontSize: 16,
+      cursor: 'pointer',
+      flexShrink: 0,
+    },
+    filterModalBody: {
+      padding: '4px 16px 16px',
+      overflowY: 'auto',
+    },
+    filterModalFooter: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: 10,
+      padding: '12px 16px',
+      borderTop: `1px solid ${theme.border}`,
+      flexShrink: 0,
+    },
+    filterModalDoneBtn: {
+      marginLeft: 'auto', fontSize: 13, fontWeight: 700, color: '#fff', background: theme.accent,
+      border: 'none', borderRadius: 8, padding: '9px 16px', cursor: 'pointer',
     },
     filterRow: { display: 'flex', alignItems: 'flex-start', gap: 10, marginTop: 10 },
     filterRowLabel: {
