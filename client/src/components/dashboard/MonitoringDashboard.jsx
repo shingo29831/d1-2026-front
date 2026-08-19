@@ -214,6 +214,15 @@ export default function MonitoringDashboard({
     dummyZoneMembership.current = {};
   }, []);
 
+  // 【2026-08-19追加】本番環境に切り替えた瞬間に「ダミーを置く」機能そのものを
+  // 非表示にする(StatusBar.jsx側)だけでなく、デモ中に既に置いていたダミーが
+  // 本番環境の画面に残ったまま表示され続けることも避けたいため、本番環境へ
+  // 切り替わったタイミングで既存のダミーもまとめて消しておく。
+  useEffect(() => {
+    if (isProduction) clearDummies();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProduction]);
+
   // ダミーが移動して危険/注意エリアに入ったら、実際のYOLO検出時と同じように
   // 自動で危険通知を発生させる(矢印キーでの移動に連動)。数字キー3〜9による
   // 「エリア接近の模擬」は押した瞬間に強制的に発生させるものだったが、これは
@@ -497,7 +506,10 @@ export default function MonitoringDashboard({
         hasPerson={hasPerson}
         confidencePct={confidencePct}
         personCount={personCount}
-        statusText={isLost ? '検出待ち' : statusText}
+        // 【2026-08-19追加】本番環境では継続的な姿勢ストリームが無く常時isLost=trueに
+        // なるため、以前はここが常に「検出待ち」のまま固定表示されてしまっていた。
+        // 本番環境では意味のない表示のため、あえて空にしてStatusBar側で非表示にする。
+        statusText={isLost ? (isProduction ? '' : '検出待ち') : statusText}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         inputMode={inputMode}

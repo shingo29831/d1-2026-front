@@ -30,11 +30,17 @@ export default function StatusBar({
   const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   const pillColor = !connected ? theme.textFaint : hasPerson ? theme.accent : theme.warning;
+  // 【2026-08-19変更】本番環境では継続的な姿勢ストリームが無く、常に「人物なし」の
+  // 状態になるため、以前はここが常に「検出待ち」のまま固定表示されてしまっていた。
+  // 本番環境では「検出待ち」という文言そのものが実態と合わないため、単純な接続状態
+  // (接続中/未接続)の表示に置き換える(他画面でも「接続中」を同じ意味で使っている)。
   const pillText = !connected
     ? 'サーバー未接続'
     : hasPerson
       ? `検出中 (信頼度${confidencePct}%)`
-      : '検出待ち';
+      : isProduction
+        ? '接続中'
+        : '検出待ち';
 
   return (
     <div style={s.bar}>
@@ -56,7 +62,9 @@ export default function StatusBar({
           <span style={{ ...s.dot, background: pillColor }} />
           {pillText}
         </span>
-        <span style={s.stateText}>{statusText}</span>
+        {/* 本番環境で意図的に空文字を渡している場合(MonitoringDashboard.jsx参照)は、
+            空のピルだけが残ってしまわないよう、そもそも描画しない。 */}
+        {statusText && <span style={s.stateText}>{statusText}</span>}
         <span style={s.countChip}>
           <span style={{ ...s.countDot, background: personCount > 0 ? theme.accent : theme.borderSoft }} />
           検出人数: {personCount || 0}人
@@ -72,26 +80,34 @@ export default function StatusBar({
               shouldCapture={shouldCapture}
               cameraError={cameraError}
             />
-            <span style={s.rightSep} />
-            <button
-              onClick={onAddDummy}
-              style={s.toggleBtn}
-              title="人物を模したダミーを部屋の中央付近に置きます。クリックして選択後、矢印キーで移動、数字キー(1〜9)で転倒・誤飲・危険エリアへの接近などの危険行為を模擬発生できます。"
-            >
-              🧍 ダミーを置く
-            </button>
-            {dummyCount > 0 && (
+            {/* 【2026-08-19変更】「本番環境に切り替えたらダミーを置く機能を削除してほしい」
+                というご要望を受け、ダミー関連のUI(配置ボタン・体数チップ・キー操作の
+                ヘルプ・削除ボタン)一式を、本番環境モードでは丸ごと非表示にする。
+                CameraControls(Webカメラの再試行など)は従来通りDEVビルドでは常に表示する。 */}
+            {!isProduction && (
               <>
-                <span style={s.countChip}>
-                  <span style={{ ...s.countDot, background: theme.accent }} />
-                  ダミー: {dummyCount}体(矢印キーで移動)
-                </span>
-                <span style={s.keyHelpChip} title={dummyKeyHelp}>
-                  ⌨ 1〜9キーで危険行為を模擬
-                </span>
-                <button onClick={onClearDummies} style={s.toggleBtn} title="配置したダミーをすべて削除します">
-                  ダミーを削除
+                <span style={s.rightSep} />
+                <button
+                  onClick={onAddDummy}
+                  style={s.toggleBtn}
+                  title="人物を模したダミーを部屋の中央付近に置きます。クリックして選択後、矢印キーで移動、数字キー(1〜9)で転倒・誤飲・危険エリアへの接近などの危険行為を模擬発生できます。"
+                >
+                  🧍 ダミーを置く
                 </button>
+                {dummyCount > 0 && (
+                  <>
+                    <span style={s.countChip}>
+                      <span style={{ ...s.countDot, background: theme.accent }} />
+                      ダミー: {dummyCount}体(矢印キーで移動)
+                    </span>
+                    <span style={s.keyHelpChip} title={dummyKeyHelp}>
+                      ⌨ 1〜9キーで危険行為を模擬
+                    </span>
+                    <button onClick={onClearDummies} style={s.toggleBtn} title="配置したダミーをすべて削除します">
+                      ダミーを削除
+                    </button>
+                  </>
+                )}
               </>
             )}
             <span style={s.rightSep} />
