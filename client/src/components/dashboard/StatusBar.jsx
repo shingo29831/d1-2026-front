@@ -23,6 +23,8 @@ export default function StatusBar({
   dummyKeyHelp,
   heatmapOn,
   onToggleHeatmap,
+  notificationCount,
+  onOpenNotifications,
 }) {
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
@@ -182,6 +184,23 @@ export default function StatusBar({
           >
             ヒートマップ
           </button>
+          {/* 【2026-08-19追加】スマホ幅では危険通知/AIリスクサジェストのパネルが
+              3Dシーンの下(スクロールしないと見えない位置)にあり気付きにくいため、
+              ここにボタンを置き、押すとモーダルで一覧をすぐ確認できるようにする
+              (NotificationModal.jsx参照)。デスクトップでは右側に常時パネルが
+              表示されているため、このボタン自体を出さない。 */}
+          {isMobile && (
+            <button
+              onClick={onOpenNotifications}
+              style={s.toggleBtn}
+              title="危険通知・AIリスクサジェストをモーダルで確認できます"
+            >
+              通知
+              {notificationCount > 0 && (
+                <span style={s.notifBadge}>{notificationCount}</span>
+              )}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -301,6 +320,18 @@ function makeStyles(theme, isMobile) {
       background: theme.accentSoft,
       color: theme.accent,
       border: `1px solid ${theme.accentBorder}`,
+    },
+    // 「通知」ボタンに乗せる未読件数バッジ(NotificationPanel.jsxのcountバッジと
+    // 同じ配色にして、危険通知と同じ「赤=要確認」という意味を統一している)。
+    notifBadge: {
+      marginLeft: 6,
+      background: '#f43f5e',
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: 700,
+      borderRadius: 999,
+      padding: '1px 6px',
+      display: 'inline-block',
     },
   };
 }

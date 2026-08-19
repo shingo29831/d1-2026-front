@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import StatusBar from './StatusBar';
 import NotificationPanel from './NotificationPanel';
+import NotificationModal from './NotificationModal';
 import KeyLegendOverlay from './KeyLegendOverlay';
 import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
@@ -65,6 +66,11 @@ export default function MonitoringDashboard({
   // IncidentHeatmap3D.jsx)と同じロジック(incidentHeatmap.js)を使う。
   // --------------------------------------------------------------
   const [showHeatmap, setShowHeatmap] = useState(false);
+  // 【2026-08-19追加】スマホ幅で「通知」ボタン(StatusBar.jsx)を押したときに
+  // 危険通知・AIリスクサジェストをモーダル(NotificationModal.jsx)で表示する
+  // ための開閉状態。デスクトップでは従来通り右側に常時パネル(NotificationPanel.jsx)
+  // を表示するため、このモーダルはスマホ幅のときだけ使う(下記のJSX参照)。
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   // 【重要】本番環境モードでは、取得に失敗してもサンプルデータへフォールバック
   // しない(historyApi.js参照)。ここは背景に重ねる補助的なヒートマップのため
   // 専用のエラー表示までは出さないが、取得できなかった場合はincidents:[]の
@@ -522,6 +528,8 @@ export default function MonitoringDashboard({
         dummyKeyHelp={dummyKeyHelp}
         heatmapOn={showHeatmap}
         onToggleHeatmap={toggleHeatmap}
+        notificationCount={notifications.length}
+        onOpenNotifications={() => setShowNotificationModal(true)}
       />
       <div style={styles.body}>
         <div style={styles.sceneWrap}>
@@ -594,14 +602,30 @@ export default function MonitoringDashboard({
             </div>
           )}
         </div>
-        <NotificationPanel
+        {/* 【2026-08-19変更】スマホ幅では、この常時表示パネルの代わりに
+            StatusBarの「通知」ボタン→下のNotificationModalへ一本化した
+            (3Dシーンの下にスクロールしないと見えない位置にあり気付きにくかった
+            ため)。デスクトップでは従来通りここに常時表示する。 */}
+        {!isMobile && (
+          <NotificationPanel
+            notifications={notifications}
+            onAck={acknowledgeNotification}
+            onDismiss={dismissNotification}
+            onClearAll={clearAll}
+            riskSuggestions={riskSuggestions}
+          />
+        )}
+      </div>
+      {isMobile && showNotificationModal && (
+        <NotificationModal
           notifications={notifications}
           onAck={acknowledgeNotification}
           onDismiss={dismissNotification}
           onClearAll={clearAll}
           riskSuggestions={riskSuggestions}
+          onClose={() => setShowNotificationModal(false)}
         />
-      </div>
+      )}
     </div>
   );
 }
