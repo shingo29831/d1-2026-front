@@ -286,7 +286,11 @@ export default function CameraSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        {/* 【2026-08-19変更】「各設定項目の3Dプレビューは一番下に表示してほしい」
+            というご要望を受け、スマホ幅(縦積み)のときだけこの列を一番下に回す。
+            デスクトップでは元通り中央列のまま(CSS Gridのorderプロパティで見た目の
+            順序だけ変える)。 */}
+        <div style={{ ...s.col, order: isMobile ? 3 : 2 }}>
           <section style={s.card}>
             <div style={s.previewHeader}>
               <h3 style={{ ...s.h3, margin: 0 }}>プレビュー</h3>
@@ -321,7 +325,7 @@ export default function CameraSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        <div style={{ ...s.col, order: isMobile ? 2 : 3 }}>
           <section style={s.card}>
             <h3 style={s.h3}>設置方法</h3>
             <div style={s.shapeTabs}>

@@ -75,7 +75,7 @@ export default function NotificationModal({ notifications, onAck, onDismiss, onC
                   <button style={styles.clearBtn} onClick={onClearAll}>すべてクリア</button>
                 </div>
               )}
-              <div style={styles.list}>
+              <div style={{ ...styles.list, ...(notifications.length === 0 ? styles.listEmpty : {}) }}>
                 {notifications.length === 0 && (
                   <div style={styles.empty}>現在、通知はありません。</div>
                 )}
@@ -115,7 +115,7 @@ export default function NotificationModal({ notifications, onAck, onDismiss, onC
           )}
 
           {activeTab === 'suggestions' && (
-            <div style={styles.riskList}>
+            <div style={{ ...styles.riskList, ...(suggestions.length === 0 ? styles.listEmpty : {}) }}>
               {suggestions.length === 0 && (
                 <div style={styles.empty}>現在、AIリスクサジェストはありません。</div>
               )}
@@ -133,11 +133,24 @@ export default function NotificationModal({ notifications, onAck, onDismiss, onC
   );
 }
 
+// 【2026-08-19追加】危険通知/AIリスクサジェストの一覧を「常に4件ぶんの高さで
+// 表示し、5件目以降はスクロールで見られるように」というご要望への対応。
+// 通知1件あたりの実測の高さ(アイコン行+本文+操作ボタン+余白)を目安に、
+// 4件がちょうど収まる高さを固定値として指定する(件数が0〜3件のときも
+// このぶんの高さを確保したままにして、モーダルの大きさ自体は常に一定にする)。
+const LIST_VISIBLE_HEIGHT = 392;
+
 function makeStyles(theme) {
   return {
     // 【2026-08-19変更】「通知のモーダルは画面の中央に表示してほしい」という
     // ご要望を受け、以前の下からせり上がるボトムシート形式(alignItems:'flex-end')
     // から、画面の縦横中央に表示する形式へ変更した。
+    // 【重要・不具合修正】@react-three/dreiの<Html>(見守りカメラ・危険/注意
+    // エリアなどの3Dラベル)は既定でzIndexRange([16777271, 0])という非常に
+    // 大きなz-indexを自前で付与するため、以前のzIndex:1000のままだと3D
+    // シーン側のラベルがこのモーダルより手前に表示されてしまっていた
+    // (「通知ボタンを押したらこのようになってしまっている」というご指摘の原因)。
+    // 3DラベルのzIndexを大きく上回る値にして、常にモーダルが最前面に来るようにする。
     overlay: {
       position: 'fixed',
       inset: 0,
@@ -146,7 +159,7 @@ function makeStyles(theme) {
       alignItems: 'center',
       justifyContent: 'center',
       padding: 16,
-      zIndex: 1000,
+      zIndex: 100000000,
     },
     card: {
       width: '100%',
@@ -206,12 +219,23 @@ function makeStyles(theme) {
       borderRadius: 999,
       padding: '1px 7px',
     },
-    body: { flex: 1, overflowY: 'auto' },
+    // 【2026-08-19変更】以前はここ(body)自体がflex:1+overflowY:'auto'で伸び縮み
+    // していたため、通知が0〜3件のときはモーダル全体がその分小さくなってしまって
+    // いた。「モーダルの大きさは固定して常に4つの通知が表示されるように」という
+    // ご要望を受け、伸び縮みする役割を下のlist/riskList側(固定高さ+スクロール)に
+    // 移し、bodyはただの入れ物にした(モーダルの高さは件数によらず常に一定になる)。
+    body: { display: 'flex', flexDirection: 'column' },
     clearRow: { display: 'flex', justifyContent: 'flex-end', padding: '8px 12px 0' },
     clearBtn: { fontSize: 11, color: theme.textFaint, background: 'transparent', border: 'none', cursor: 'pointer' },
-    list: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
+    // 通知1件ぶんの高さ(アイコン行+本文+操作ボタン+余白)から逆算した、4件が
+    // ちょうど収まる固定の高さ(LIST_VISIBLE_HEIGHT)。0〜3件のときも同じ高さを
+    // 保ち、5件目以降はここだけが縦スクロールする。
+    list: { height: LIST_VISIBLE_HEIGHT, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
+    // 0件のときは固定高さの領域の中で「現在、通知はありません。」を縦方向にも
+    // 中央寄せにして、ただの空白にならないようにする。
+    listEmpty: { justifyContent: 'center' },
     empty: { color: theme.textFaint, fontSize: 12, padding: 24, textAlign: 'center' },
-    riskList: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
+    riskList: { height: LIST_VISIBLE_HEIGHT, overflowY: 'auto', padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
     riskItem: {
       background: theme.mode === 'dark' ? 'rgba(245,158,11,0.08)' : 'rgba(217,119,6,0.06)',
       borderLeft: `3px solid ${theme.warning}`,

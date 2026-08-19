@@ -221,7 +221,11 @@ export default function DoorSensorSetupPage() {
         </section>
         </div>
 
-        <div style={s.col}>
+        {/* 【2026-08-19変更】「各設定項目の3Dプレビューは一番下に表示してほしい」
+            というご要望を受け、スマホ幅(縦積み)のときだけこの列を一番下に回す。
+            デスクトップでは元通り中央列のまま(CSS Gridのorderプロパティで見た目の
+            順序だけ変える)。 */}
+        <div style={{ ...s.col, order: isMobile ? 3 : 2 }}>
         <section style={s.card}>
           <h3 style={s.h3}>3Dプレビュー</h3>
           <p style={s.desc}>緑=閉、赤=開。配置・編集した内容は保存操作なしですぐにここと見守りダッシュボードに反映されます。</p>
@@ -231,7 +235,7 @@ export default function DoorSensorSetupPage() {
         </section>
         </div>
 
-        <div style={s.col}>
+        <div style={{ ...s.col, order: isMobile ? 2 : 3 }}>
         <section style={s.card}>
           <h3 style={s.h3}>🚪 開閉センサー一覧({doorSensors.length})</h3>
           {doorSensors.length === 0 && <p style={s.emptyNote}>まだ開閉センサーがありません。上の間取り図をクリックして追加してください。</p>}

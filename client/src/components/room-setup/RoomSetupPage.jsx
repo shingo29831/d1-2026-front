@@ -324,7 +324,11 @@ export default function RoomSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        {/* 【2026-08-19変更】「各設定項目の3Dプレビューは一番下に表示してほしい」
+            というご要望を受け、スマホ幅(縦積み)のときだけこの列を一番下に回す。
+            デスクトップでは元通り中央列のまま(CSS Gridのorderプロパティで見た目の
+            順序だけ変える。DOM自体の順序=保存/入力の処理順は変えていない)。 */}
+        <div style={{ ...s.col, order: isMobile ? 3 : 2 }}>
           <section style={s.card}>
             <h3 style={s.h3}>3Dプレビュー</h3>
             <p style={s.desc}>①の内容を変更すると、保存前でもここに反映されます。</p>
@@ -341,7 +345,7 @@ export default function RoomSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        <div style={{ ...s.col, order: isMobile ? 2 : 3 }}>
           <section style={s.card}>
             <h3 style={s.h3}>① 部屋の形を作成する</h3>
 

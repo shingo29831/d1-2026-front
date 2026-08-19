@@ -602,19 +602,22 @@ export default function MonitoringDashboard({
             </div>
           )}
         </div>
-        {/* 【2026-08-19変更】スマホ幅では、この常時表示パネルの代わりに
-            StatusBarの「通知」ボタン→下のNotificationModalへ一本化した
-            (3Dシーンの下にスクロールしないと見えない位置にあり気付きにくかった
-            ため)。デスクトップでは従来通りここに常時表示する。 */}
-        {!isMobile && (
-          <NotificationPanel
-            notifications={notifications}
-            onAck={acknowledgeNotification}
-            onDismiss={dismissNotification}
-            onClearAll={clearAll}
-            riskSuggestions={riskSuggestions}
-          />
-        )}
+        {/* 【2026-08-19変更】スマホ幅では、3Dシーンの高さが固定(55vh)のため、
+            通知パネルを外すとその下が単なる空白になってしまっていた
+            (「3Dプレビューの下が余白になっているので危険行為をここに表示して
+            ほしい」というご指摘)。「通知」ボタン→モーダルはそのまま残しつつ
+            (AIリスクサジェストも含めた全件をいつでも確認できる)、この空いた
+            場所には危険通知だけを常時表示する(riskSuggestionsを渡さないことで
+            NotificationPanel.jsx側のAIリスクサジェスト欄は自動的に非表示になる。
+            AIリスクサジェストの一覧は引き続き「通知」ボタンのモーダル側で確認する)。
+            デスクトップでは従来通り、危険通知・AIリスクサジェストの両方を常時表示する。 */}
+        <NotificationPanel
+          notifications={notifications}
+          onAck={acknowledgeNotification}
+          onDismiss={dismissNotification}
+          onClearAll={clearAll}
+          riskSuggestions={isMobile ? [] : riskSuggestions}
+        />
       </div>
       {isMobile && showNotificationModal && (
         <NotificationModal

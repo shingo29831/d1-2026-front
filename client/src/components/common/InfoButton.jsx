@@ -66,6 +66,12 @@ function makeStyles(theme) {
     },
     // 【2026-08-19変更】「モーダルは画面の中央に表示してほしい」というご要望に
     // 合わせ、alignItems:'center'で常に画面の縦横中央に表示する。
+    // 【重要・不具合修正】このボタンは<RoomScene>(3Dプレビュー)を持つページ
+    // (部屋・カメラ・家具・エリア・センサーの各設定タブ)でも使われており、
+    // @react-three/dreiの<Html>ラベル(見守りカメラのマーカーなど)は既定で
+    // 非常に大きなzIndex(zIndexRange既定値[16777271, 0])を自前で持つため、
+    // 以前のzIndex:1000のままだと3Dラベルがこのモーダルより手前に表示されて
+    // しまう不具合があった(NotificationModal.jsxと同じ原因・同じ対処)。
     overlay: {
       position: 'fixed',
       inset: 0,
@@ -74,7 +80,7 @@ function makeStyles(theme) {
       alignItems: 'center',
       justifyContent: 'center',
       padding: 16,
-      zIndex: 1000,
+      zIndex: 100000000,
     },
     card: {
       width: '100%',
