@@ -185,6 +185,11 @@ export default function HistoryPage() {
   };
   const selectAllCategories = () => setSelectedCategories(new Set(ALL_CATEGORY_KEYS));
   const allSelected = selectedCategories.size === ALL_CATEGORY_KEYS.length;
+  // 【2026-08-19further変更】「履歴一覧の右側の端っこに絞り込みボタンを配置して
+  // ほしい」というご要望に伴い、見出し行の絞り込みボタンに「現在絞り込み中か」
+  // をひと目で分かるバッジを付けるために追加。何かひとつでも既定値から変わって
+  // いれば絞り込み中とみなす。
+  const isFilterActive = !allSelected || selectedAreaId !== null || dateRangeKey !== 'all' || searchText.trim() !== '';
 
   // 転倒・誤飲・危険エリアへの接近など、「その状態だけ」に一発で絞り込むためのクイック
   // フィルター(GROUPS参照)。CATEGORIESの詳細チップとは別に、履歴一覧(右側)の
@@ -346,8 +351,6 @@ export default function HistoryPage() {
 
       <div style={s.grid}>
         <section style={{ ...s.card, ...s.listCard }}>
-          <h3 style={s.h3}>履歴一覧({incidents.length}件)</h3>
-
           {/* 「見やすく・簡単に絞り込みができるように」で追加した、共通の絞り込みバー。
               キーワード検索・期間のクイックフィルター・全リセットボタンをここに
               まとめてある(絞り込み結果はヒートマップ・3D棒グラフ・一覧すべてに
@@ -357,23 +360,31 @@ export default function HistoryPage() {
               【2026-08-19further変更】「履歴一覧の絞り込みもモーダル化してほしい」
               というご要望を受け、キーワード・期間・種類・エリアの詳細な絞り込み
               項目は、この場でインライン展開するのをやめてモーダルで表示するように
-              変更した。件数サマリ・リセットボタンはこの場に残し、絞り込みボタンを
-              押すとモーダルが開く。 */}
-          <section style={s.filterBar}>
-            <div style={s.filterBarHeader}>
-              <button
-                style={s.filterToggleBtn}
-                onClick={() => setFilterOpen(true)}
-              >
-                <span style={s.filterToggleChevron}>▸</span>
-                絞り込み
-              </button>
-              <span style={s.filterSummary}>
-                {allIncidents.length}件中 <strong>{incidents.length}件</strong>を表示中
-              </span>
-              <button style={s.resetBtn} onClick={resetAllFilters}>絞り込みをリセット</button>
-            </div>
-          </section>
+              変更した。
+              【2026-08-19further2変更】「履歴一覧の右側の端っこに絞り込みボタンを
+              配置してモーダルが出るように」というご要望を受け、絞り込みボタンを
+              独立した箱から見出し(履歴一覧(N件))と同じ行の右端へ移動した。
+              件数サマリ・リセットボタンは見出し行のすぐ下に小さく残し、
+              絞り込み中は見出し行のボタンに件数バッジを表示する。 */}
+          <div style={s.cardHeaderRow}>
+            <h3 style={s.h3}>履歴一覧({incidents.length}件)</h3>
+            <button
+              style={s.filterCornerBtn}
+              onClick={() => setFilterOpen(true)}
+            >
+              <span style={s.filterToggleChevron}>▸</span>
+              絞り込み
+              {isFilterActive && (
+                <span style={s.filterActiveBadge}>{incidents.length}</span>
+              )}
+            </button>
+          </div>
+          <div style={s.filterSummaryRow}>
+            <span style={s.filterSummary}>
+              {allIncidents.length}件中 <strong>{incidents.length}件</strong>を表示中
+            </span>
+            <button style={s.resetBtn} onClick={resetAllFilters}>絞り込みをリセット</button>
+          </div>
 
           {filterOpen && (
             <div style={s.filterModalOverlay} onClick={() => setFilterOpen(false)}>
@@ -760,18 +771,27 @@ function makeStyles(theme, isMobile) {
     listCard: { display: 'flex', flexDirection: 'column' },
     cardHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, flexWrap: 'wrap', gap: 8 },
     desc: { fontSize: 12, color: theme.textMuted, lineHeight: 1.6, marginBottom: 10 },
-    // 「見やすく・簡単に絞り込みができるように」で追加した、共通の絞り込みバー用のスタイル。
-    filterBar: {
-      background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14,
-      padding: '16px 20px', marginBottom: 22,
+    // 【2026-08-19further2変更】「履歴一覧の右側の端っこに絞り込みボタンを配置して
+    // ほしい」というご要望への対応。以前は独立した箱(filterBar)の中に絞り込み
+    // ボタンを置いていたが、見出し(履歴一覧(N件))と同じ行の右端に置く、ボタンと
+    // 分かりやすいピル型のボタンに変更した。
+    filterCornerBtn: {
+      display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 700,
+      color: theme.textStrong, background: theme.panelBgAlt, border: `1px solid ${theme.borderSoft}`,
+      borderRadius: 8, cursor: 'pointer', padding: '7px 12px', flexShrink: 0,
     },
-    filterBarHeader: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
-    filterToggleBtn: {
-      display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 15.5, fontWeight: 700,
-      color: theme.textStrong, background: 'transparent', border: 'none', cursor: 'pointer', padding: '2px 0',
+    // 絞り込み中(既定値から何か変わっている状態)であることをひと目で伝えるための
+    // 小さな件数バッジ。
+    filterActiveBadge: {
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'center', minWidth: 18, height: 18,
+      padding: '0 5px', borderRadius: 999, background: theme.accent, color: '#fff', fontSize: 10.5,
+      fontWeight: 800, lineHeight: 1,
     },
     filterToggleChevron: { display: 'inline-block', fontSize: 12, color: theme.textFaint, transition: 'transform 0.15s ease' },
     filterSummary: { fontSize: 12.5, color: theme.textMuted },
+    // 見出し行の下に残す、件数サマリとリセットボタンの行(絞り込みボタン自体は
+    // 見出し行の右端に移動したため、ここには軽い付随情報だけを残している)。
+    filterSummaryRow: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap', marginBottom: 14 },
     resetBtn: {
       marginLeft: 'auto', fontSize: 12, color: theme.accent, background: 'transparent',
       border: `1px solid ${theme.accentBorder}`, borderRadius: 7, padding: '6px 12px', cursor: 'pointer',

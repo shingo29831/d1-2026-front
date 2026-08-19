@@ -131,8 +131,20 @@ export default function LoginPage({ onLogin }) {
 
 function makeStyles(theme) {
   return {
+    // 【2026-08-19further変更】「スマホになるとログイン画面が縦スクロール
+    // できるようになっているのでできないようにして、ログインフォームを
+    // 画面の中央に表示してほしい」というご要望への対応。以前はminHeight:
+    // '100vh'だったため、画面が低い機種では100vhを超えてページ全体が
+    // 縦スクロールしてしまい、フォームが常に中央に見えるとは限らなかった。
+    // height:'100vh'(+box-sizing:border-box)に変え、これ自体はスクロール
+    // させない(overflow:'hidden')。万一きわめて縦が短い画面でフォームが
+    // 収まりきらない場合の保険として、カード側にmaxHeight+overflowY:'auto'
+    // を付けている(その場合もページ全体ではなくカードの中だけがスクロール
+    // する)。
     backdrop: {
-      minHeight: '100vh',
+      height: '100vh',
+      overflow: 'hidden',
+      boxSizing: 'border-box',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -143,6 +155,9 @@ function makeStyles(theme) {
     card: {
       width: '100%',
       maxWidth: 360,
+      maxHeight: '100%',
+      overflowY: 'auto',
+      boxSizing: 'border-box',
       background: theme.panelBg,
       border: `1px solid ${theme.border}`,
       borderRadius: 10,
