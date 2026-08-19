@@ -7,6 +7,7 @@ import { describeCognitoError } from '../../cognitoErrors';
 import { checkHistoryApiConnectivity } from '../../historyApi';
 import { getSignedIotWebSocketUrl } from '../../iotClient';
 import { withTimeout } from '../../withTimeout';
+import { useViewport } from '../../hooks/useViewport';
 
 // ===================================================================
 // 「接続状況」診断ページ。
@@ -59,7 +60,8 @@ export default function ConnectionStatusPage({
 }) {
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
+  const { isMobile } = useViewport();
+  const styles = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   const HISTORY_API_URL = import.meta.env.VITE_HISTORY_API_URL || '';
   const IOT_ENDPOINT = import.meta.env.VITE_IOT_ENDPOINT || '';
@@ -214,7 +216,7 @@ export default function ConnectionStatusPage({
   }, [IOT_ENDPOINT]);
 
   return (
-    <div style={{ padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' }}>
       <h2 style={{ marginTop: 0, color: theme.textStrong, fontSize: 22 }}>接続状況</h2>
       <p style={{ color: theme.textMuted, maxWidth: 1000, lineHeight: 1.7, fontSize: 14.5 }}>
         AWS(Cognito・IoT Core・履歴API)および検出パイプライン(Webカメラ・見守りサーバー)との
@@ -389,10 +391,11 @@ function StatusBadge({ state, theme, label }) {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   return {
     // 他の設定画面(部屋の設定など)と統一感を持たせるため、カードは3列のグリッドに並べる。
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, marginTop: 8 },
+    // スマホ幅では3列だと1カードが極端に狭くなってしまうため1列に潰す。
+    grid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? 14 : 20, marginTop: 8 },
     card: {
       background: theme.panelBg,
       border: `1px solid ${theme.border}`,

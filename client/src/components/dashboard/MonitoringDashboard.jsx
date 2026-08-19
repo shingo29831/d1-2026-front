@@ -12,6 +12,7 @@ import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
 import { getIncidentsSortedDesc } from '../../incidentHistory';
 import { fetchIncidentsSortedDesc } from '../../historyApi';
+import { useViewport } from '../../hooks/useViewport';
 
 const DUMMY_STEP_M = 0.15; // 矢印キー1回あたりの移動量
 let dummyIdSeq = 0;
@@ -50,6 +51,9 @@ export default function MonitoringDashboard({
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'pov'
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
+  // 【2026-08-19追加: スマホ対応】スマホ幅では3Dシーンと通知パネルを横並びに
+  // すると狭すぎて両方潰れてしまうため、シーンを上・通知パネルを下に縦積みへ切り替える。
+  const { isMobile } = useViewport();
   const { footprint, zones, walls, furniture, roomShapeType, cameraMount, cameraYawDeg } = useRoomConfig();
 
   // --------------------------------------------------------------
@@ -457,9 +461,12 @@ export default function MonitoringDashboard({
 
   const styles = useMemo(() => ({
     page: { display: 'flex', flexDirection: 'column', height: '100%', background: theme.appBg },
-    body: { flex: 1, display: 'flex', minHeight: 0 },
-    sceneWrap: { flex: 1, position: 'relative' },
-  }), [theme]);
+    // スマホ幅では縦積み(column)、それ以外は従来通り横並び(row)。
+    body: { flex: 1, display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: 0, overflowY: isMobile ? 'auto' : 'visible' },
+    // スマホ幅では高さを固定して確保しないと3Dシーンが潰れてしまうため、
+    // 縦積み時は画面の半分程度の高さを確保しておく。
+    sceneWrap: { flex: isMobile ? '0 0 auto' : 1, position: 'relative', height: isMobile ? '55vh' : 'auto', minHeight: isMobile ? 320 : 0 },
+  }), [theme, isMobile]);
 
   // 数字キー(1〜9)と危険行為の対応表(現在のzones設定に応じて動的に生成する)。
   // KeyLegendOverlay(見守りシーン上に常時表示するパネル)とStatusBarの
@@ -527,7 +534,7 @@ export default function MonitoringDashboard({
               padding: '12px',
               boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
               zIndex: 10,
-              maxWidth: '320px',
+              maxWidth: isMobile ? 'calc(100vw - 64px)' : '320px',
               pointerEvents: 'none'
             }}>
               <h4 style={{ margin: '0 0 8px 0', color: theme.warning || '#f59e0b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -584,7 +591,7 @@ export default function MonitoringDashboard({
                 data-dashboard="true"
                 style={{
                   display: isCameraExpanded ? 'block' : 'none',
-                  width: '320px',
+                  width: isMobile ? 'min(320px, calc(100vw - 64px))' : '320px',
                   height: '240px',
                   background: '#000',
                   borderRadius: '8px',

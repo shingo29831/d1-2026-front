@@ -1,5 +1,6 @@
 import React, { useMemo } from 'react';
 import { useTheme } from '../../themeContext';
+import { useViewport } from '../../hooks/useViewport';
 
 // 日付(月/日)・時・分・秒までを表示する(以前は時:分のみだったため、日をまたいだ
 // 通知の見分けや、短時間に連続した通知の前後関係が分かりにくかった)。
@@ -34,7 +35,11 @@ const ANIM_STYLE = `
 
 export default function NotificationPanel({ notifications, onAck, onDismiss, onClearAll }) {
   const { theme } = useTheme();
-  const styles = useMemo(() => makeStyles(theme), [theme]);
+  // 【2026-08-19追加: スマホ対応】MonitoringDashboard.jsx側でスマホ幅のときは
+  // 3Dシーンの下に縦積みするレイアウトに切り替えているため、このパネル自身も
+  // 固定320px幅ではなく画面幅いっぱい・高さは決め打ちにする必要がある。
+  const { isMobile } = useViewport();
+  const styles = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   return (
     <aside style={styles.panel}>
@@ -85,17 +90,30 @@ export default function NotificationPanel({ notifications, onAck, onDismiss, onC
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   return {
-    panel: {
-      width: 320,
-      flexShrink: 0,
-      borderLeft: `1px solid ${theme.border}`,
-      background: theme.panelBgAlt,
-      display: 'flex',
-      flexDirection: 'column',
-      height: '100%',
-    },
+    panel: isMobile
+      ? {
+        width: '100%',
+        flexShrink: 0,
+        borderLeft: 'none',
+        borderTop: `1px solid ${theme.border}`,
+        background: theme.panelBgAlt,
+        display: 'flex',
+        flexDirection: 'column',
+        // 縦積み時は画面いっぱいの高さを取ると3Dシーンが見えなくなるため、
+        // ここだけスクロールする決め打ちの高さにしておく。
+        height: 320,
+      }
+      : {
+        width: 320,
+        flexShrink: 0,
+        borderLeft: `1px solid ${theme.border}`,
+        background: theme.panelBgAlt,
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+      },
     header: {
       display: 'flex',
       alignItems: 'center',

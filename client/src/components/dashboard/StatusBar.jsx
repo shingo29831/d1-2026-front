@@ -3,6 +3,7 @@ import { ROOM_LABEL, CAMERA_LABEL } from '../../config';
 import CameraControls from '../camera-setup/CameraControls';
 import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
+import { useViewport } from '../../hooks/useViewport';
 
 export default function StatusBar({
   connected,
@@ -25,7 +26,8 @@ export default function StatusBar({
 }) {
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const { isMobile } = useViewport();
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   const pillColor = !connected ? theme.textFaint : hasPerson ? theme.accent : theme.warning;
   const pillText = !connected
@@ -123,7 +125,7 @@ export default function StatusBar({
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   return {
     bar: {
       // 以前はここに固定表示のハンバーガーボタンが重なっていたため左側の余白を
@@ -131,7 +133,7 @@ function makeStyles(theme) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '14px 20px',
+      padding: isMobile ? '10px 12px' : '14px 20px',
       borderBottom: `1px solid ${theme.border}`,
       background: theme.panelBgAlt,
       flexWrap: 'wrap',
@@ -141,7 +143,7 @@ function makeStyles(theme) {
     title: { color: theme.textStrong, fontWeight: 700, fontSize: 15 },
     sep: { color: theme.borderSoft },
     crumb: { color: theme.textMuted },
-    center: { display: 'flex', alignItems: 'center', gap: 12 },
+    center: { display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' },
     pill: {
       display: 'inline-flex',
       alignItems: 'center',
@@ -182,7 +184,7 @@ function makeStyles(theme) {
       borderRadius: 999,
       cursor: 'help',
     },
-    right: { display: 'flex', alignItems: 'center', gap: 6 },
+    right: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
     rightSep: { width: 1, alignSelf: 'stretch', background: theme.border, margin: '0 4px' },
     toggleBtn: {
       fontSize: 12,

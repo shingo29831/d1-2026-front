@@ -4,6 +4,7 @@ import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { rectFootprint, lShapeFootprint, footprintBounds } from '../../roomShapes';
 import { exportLivingRoomAsGlb } from '../../exportRoomGlb';
+import { useViewport } from '../../hooks/useViewport';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -47,6 +48,7 @@ export default function RoomSetupPage() {
     addWall, updateWall, removeWall, resetWalls,
   } = useRoomConfig();
   const { theme } = useTheme();
+  const { isMobile } = useViewport();
 
   const [shapeType, setShapeType] = useState(roomShapeType);
   const [params, setParams] = useState(roomShapeParams);
@@ -263,7 +265,7 @@ export default function RoomSetupPage() {
     updateWall(id, { [key]: Number.isNaN(num) ? 0 : num });
   };
 
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   return (
     <div style={s.page}>
@@ -564,20 +566,20 @@ export default function RoomSetupPage() {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 8px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
     // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
     // 左列・中央列はカード1枚ずつ、右列は①②③④の詳細設定カードを縦に積む
-    // (colスタイルでflex-direction:columnにして積む)。
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
-    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
-    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
+    // (colスタイルでflex-direction:columnにして積む)。スマホ幅では1列に潰す。
+    grid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? 14 : 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: isMobile ? 14 : 20, minWidth: 0 },
+    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: isMobile ? 14 : 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     hint: { fontSize: 12.5, color: theme.textMuted, lineHeight: 1.6, margin: '6px 0 10px' },
     traceBox: { marginTop: 14, padding: 12, borderRadius: 10, background: theme.panelBgAlt, border: `1px dashed ${theme.borderSoft}` },

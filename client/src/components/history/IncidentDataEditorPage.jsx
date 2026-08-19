@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
+import { useViewport } from '../../hooks/useViewport';
 import { footprintBounds } from '../../roomShapes';
 import {
   CATEGORIES,
@@ -63,6 +64,7 @@ export default function IncidentDataEditorPage() {
   const { footprint, furniture, zones } = useRoomConfig();
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
+  const { isMobile } = useViewport();
 
   const [incidents, setIncidents] = useState(() => getEditableIncidents());
   const refresh = () => setIncidents(getEditableIncidents());
@@ -148,7 +150,7 @@ export default function IncidentDataEditorPage() {
     setDragPos(null);
   };
 
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   const sortedIncidents = useMemo(
     () => [...incidents].sort((a, b) => new Date(b.time) - new Date(a.time)),
@@ -333,15 +335,15 @@ function IncidentRow({ item, s, selected, onSelect, onChange, onRemove }) {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 12px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
-    grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' },
+    grid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 14 : 20, alignItems: 'start' },
     col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
     card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },

@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
+import { useViewport } from '../../hooks/useViewport';
 import { footprintBounds, footprintCenter, footprintEdges, pointInPolygon } from '../../roomShapes';
 import { isInsideZone } from '../../poseGeometry';
 import { getIncidentsSortedDesc, CATEGORIES, GROUPS } from '../../incidentHistory';
@@ -83,6 +84,7 @@ export default function HistoryPage() {
   const { footprint, walls, zones } = useRoomConfig();
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
+  const { isMobile } = useViewport();
   // 既定では全種類を選択状態にし、「すべての危険行為」をまとめて表示する。
   // 個別のチップを外すことで、その危険行為だけに絞り込んだ表示にもできる
   // (=すべての表示と、各危険行為ごとの個別表示の両方に対応)。
@@ -283,7 +285,7 @@ export default function HistoryPage() {
   const catColor = useMemo(() => Object.fromEntries(CATEGORIES.map((c) => [c.key, c.color])), []);
   const catLabel = useMemo(() => Object.fromEntries(CATEGORIES.map((c) => [c.key, c.label])), []);
 
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   const dangerCount = allIncidents.filter((i) => i.severity === 'danger').length;
   const warningCount = allIncidents.filter((i) => i.severity === 'warning').length;
@@ -688,11 +690,11 @@ export default function HistoryPage() {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 8px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 18 },
@@ -715,8 +717,10 @@ function makeStyles(theme) {
     },
     statNum: { fontSize: 26, fontWeight: 800, color: theme.textStrong, lineHeight: 1.2 },
     statLabel: { fontSize: 11.5, color: theme.textFaint, marginTop: 2 },
-    grid: { display: 'flex', gap: 24, flexWrap: 'wrap', alignItems: 'flex-start' },
-    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, width: 580 },
+    grid: { display: 'flex', gap: isMobile ? 16 : 24, flexWrap: 'wrap', alignItems: 'flex-start' },
+    // スマホ幅では固定580pxだと画面からはみ出すため、画面幅いっぱいに広げる
+    // (2枚のカードは横並びをやめ、gridのflexWrapによって自然に縦積みになる)。
+    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: isMobile ? 14 : 20, width: isMobile ? '100%' : 580 },
     listCard: { display: 'flex', flexDirection: 'column' },
     cardHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, flexWrap: 'wrap', gap: 8 },
     desc: { fontSize: 12, color: theme.textMuted, lineHeight: 1.6, marginBottom: 10 },
