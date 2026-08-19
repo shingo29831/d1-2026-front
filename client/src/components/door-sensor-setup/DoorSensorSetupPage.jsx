@@ -4,6 +4,7 @@ import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds } from '../../roomShapes';
 import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -111,15 +112,21 @@ export default function DoorSensorSetupPage() {
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>開閉センサーの設定</h2>
-      <p style={s.lead}>
-        玄関・勝手口などに取り付ける開閉センサー(仕様書の共通JSONスキーマにおける
-        <code style={s.code}>sensor_type: "door"</code>)を、間取り図上のどこに設置したかと、
-        実機と対応する device_id を登録・管理するページです。間取り図の何もない場所をクリックすると
-        新しく追加されます。一覧から項目を選んでから間取り図をクリックすると、その項目をクリックした
-        位置へ移動できます。「状態」は実際にはRole A側のセンサー本体から届くイベントで自動更新される
-        想定ですが、この画面からもテスト用に手動で切り替えられます。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        開閉センサーの設定
+        <InfoButton title="開閉センサーの設定について">
+          玄関・勝手口などに取り付ける開閉センサー(仕様書の共通JSONスキーマにおける
+          <code style={s.code}>sensor_type: "door"</code>)を、間取り図上のどこに設置したかと、
+          実機と対応する device_id を登録・管理するページです。間取り図の何もない場所をクリックすると
+          新しく追加されます。一覧から項目を選んでから間取り図をクリックすると、その項目をクリックした
+          位置へ移動できます。「状態」は実際にはRole A側のセンサー本体から届くイベントで自動更新される
+          想定ですが、この画面からもテスト用に手動で切り替えられます。
+        </InfoButton>
+      </h2>
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
           左列=間取り図(2D。クリック/ドラッグでの追加・移動もここで行う)、

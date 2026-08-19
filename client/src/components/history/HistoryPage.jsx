@@ -9,6 +9,7 @@ import { getIncidentsSortedDesc, CATEGORIES, GROUPS } from '../../incidentHistor
 import { fetchIncidentsSortedDesc } from '../../historyApi';
 import IncidentBarChart3D from './IncidentBarChart3D';
 import IncidentHeatmap3D from './IncidentHeatmap3D';
+import InfoButton from '../common/InfoButton';
 
 // エリア外の履歴をまとめて選べるようにするための特別な選択値
 // (「家具・エリアの設定」タブで定義した、どの危険/注意エリアの矩形にも
@@ -292,11 +293,17 @@ export default function HistoryPage() {
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>危険行為の履歴</h2>
-      <p style={s.lead}>
-        転倒検知・危険/注意エリアへの接近の履歴と、間取り図上でどのあたりに多く発生しているかを
-        ヒートマップで確認できます。色が濃い(赤みが強い)場所ほど、発生回数が多いエリアです。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        危険行為の履歴
+        <InfoButton title="危険行為の履歴について">
+          転倒検知・危険/注意エリアへの接近の履歴と、間取り図上でどのあたりに多く発生しているかを
+          ヒートマップで確認できます。色が濃い(赤みが強い)場所ほど、発生回数が多いエリアです。
+        </InfoButton>
+      </h2>
 
       {/* 【重要】デモ用データモードでは、履歴APIの設定有無に関わらず実データへは
           通信せず、常にこの端末で自由に追加・編集・削除できるサンプルデータを
@@ -337,132 +344,173 @@ export default function HistoryPage() {
         </div>
       </div>
 
-      {/* 「見やすく・簡単に絞り込みができるように」で追加した、共通の絞り込みバー。
-          以前は同じ種類・エリアのチップがヒートマップ側と一覧側の2箇所に別々に
-          あったため分かりにくかった。ここに一本化し、キーワード検索・期間の
-          クイックフィルター・全リセットボタンも新たに追加した(絞り込み結果は
-          ヒートマップ・3D棒グラフ・一覧すべてに即反映される)。 */}
-      <section style={s.filterBar}>
-        <div style={s.filterBarHeader}>
-          <button
-            style={s.filterToggleBtn}
-            onClick={() => setFilterOpen((v) => !v)}
-            aria-expanded={filterOpen}
-          >
-            <span style={{ ...s.filterToggleChevron, transform: filterOpen ? 'rotate(90deg)' : 'none' }}>▸</span>
-            絞り込み
-          </button>
-          <span style={s.filterSummary}>
-            {allIncidents.length}件中 <strong>{incidents.length}件</strong>を表示中
-          </span>
-          <button style={s.resetBtn} onClick={resetAllFilters}>絞り込みをリセット</button>
-        </div>
+      <div style={s.grid}>
+        <section style={{ ...s.card, ...s.listCard }}>
+          <h3 style={s.h3}>履歴一覧({incidents.length}件)</h3>
 
-        {filterOpen && (
-          <>
-            <div style={s.filterRow}>
-              <span style={s.filterRowLabel}>キーワード</span>
-              <input
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder="発生内容で検索(例: 転倒、キッチン)"
-                style={s.searchInput}
-              />
+          {/* 「見やすく・簡単に絞り込みができるように」で追加した、共通の絞り込みバー。
+              キーワード検索・期間のクイックフィルター・全リセットボタンをここに
+              まとめてある(絞り込み結果はヒートマップ・3D棒グラフ・一覧すべてに
+              即反映される)。【2026-08-19変更】「絞り込みは履歴一覧につけてほしい」
+              というご要望を受け、以前はヒートマップの上に独立して置いていたこの
+              絞り込みバーを、履歴一覧セクションの中(見出しの直下)へ移動した。 */}
+          <section style={s.filterBar}>
+            <div style={s.filterBarHeader}>
+              <button
+                style={s.filterToggleBtn}
+                onClick={() => setFilterOpen((v) => !v)}
+                aria-expanded={filterOpen}
+              >
+                <span style={{ ...s.filterToggleChevron, transform: filterOpen ? 'rotate(90deg)' : 'none' }}>▸</span>
+                絞り込み
+              </button>
+              <span style={s.filterSummary}>
+                {allIncidents.length}件中 <strong>{incidents.length}件</strong>を表示中
+              </span>
+              <button style={s.resetBtn} onClick={resetAllFilters}>絞り込みをリセット</button>
             </div>
 
-            <div style={s.filterRow}>
-              <span style={s.filterRowLabel}>期間</span>
-              <div style={s.filterTabs}>
-                {DATE_RANGES.map((r) => (
-                  <button
-                    key={r.key}
-                    onClick={() => setDateRangeKey(r.key)}
-                    style={{ ...s.filterTab, ...(dateRangeKey === r.key ? s.filterTabActive : {}) }}
-                  >
-                    {r.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+            {filterOpen && (
+              <>
+                <div style={s.filterRow}>
+                  <span style={s.filterRowLabel}>キーワード</span>
+                  <input
+                    type="text"
+                    value={searchText}
+                    onChange={(e) => setSearchText(e.target.value)}
+                    placeholder="発生内容で検索(例: 転倒、キッチン)"
+                    style={s.searchInput}
+                  />
+                </div>
 
-            <div style={s.filterRow}>
-              <span style={s.filterRowLabel}>種類</span>
-              <div style={s.filterTabs}>
-                <button
-                  onClick={selectAllCategories}
-                  style={{ ...s.filterTab, ...(allSelected ? s.filterTabActive : {}) }}
-                >
-                  すべて({allIncidents.length})
-                </button>
-                {GROUPS.map((g) => (
-                  <button
-                    key={g.key}
-                    onClick={() => selectOnlyGroup(g.categories)}
-                    style={{ ...s.filterTab, ...(isGroupActive(g.categories) ? s.filterTabActive : {}) }}
-                    title={`${g.label}の履歴だけを表示`}
-                  >
-                    {g.label}のみ({groupCounts[g.key] || 0})
-                  </button>
-                ))}
-                {CATEGORIES.map((cat) => (
-                  <button
-                    key={cat.key}
-                    onClick={() => toggleCategory(cat.key)}
-                    style={{
-                      ...s.filterTab,
-                      ...(selectedCategories.has(cat.key) ? s.filterTabActive : s.filterTabOff),
-                    }}
-                  >
-                    <span style={{ ...s.filterDot, background: cat.color }} />
-                    {cat.label}({categoryCounts[cat.key] || 0})
-                  </button>
-                ))}
-              </div>
-            </div>
+                <div style={s.filterRow}>
+                  <span style={s.filterRowLabel}>期間</span>
+                  <div style={s.filterTabs}>
+                    {DATE_RANGES.map((r) => (
+                      <button
+                        key={r.key}
+                        onClick={() => setDateRangeKey(r.key)}
+                        style={{ ...s.filterTab, ...(dateRangeKey === r.key ? s.filterTabActive : {}) }}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
-            {zoneList.length > 0 && (
-              <div style={s.filterRow}>
-                <span style={s.filterRowLabel}>エリア</span>
-                <div style={s.filterTabs}>
-                  <button
-                    onClick={selectAllAreas}
-                    style={{ ...s.filterTab, ...(selectedAreaId === null ? s.filterTabActive : {}) }}
-                  >
-                    すべてのエリア({allIncidents.length})
-                  </button>
-                  {zoneList.map((zone) => (
+                <div style={s.filterRow}>
+                  <span style={s.filterRowLabel}>種類</span>
+                  <div style={s.filterTabs}>
                     <button
-                      key={zone.id}
-                      onClick={() => setSelectedAreaId(zone.id)}
-                      style={{
-                        ...s.filterTab,
-                        ...(selectedAreaId === zone.id ? s.filterTabActive : {}),
-                      }}
-                      title={`「${zone.label}」の範囲内で発生した履歴だけを表示`}
+                      onClick={selectAllCategories}
+                      style={{ ...s.filterTab, ...(allSelected ? s.filterTabActive : {}) }}
                     >
-                      <span style={{ ...s.filterDot, background: zone.type === 'danger' ? '#f43f5e' : '#f59e0b' }} />
-                      {zone.label}({areaCounts[zone.id] || 0})
+                      すべて({allIncidents.length})
                     </button>
-                  ))}
-                  <button
-                    onClick={() => setSelectedAreaId(OUTSIDE_AREA_ID)}
-                    style={{
-                      ...s.filterTab,
-                      ...(selectedAreaId === OUTSIDE_AREA_ID ? s.filterTabActive : {}),
-                    }}
-                    title="どのエリアの範囲にも入っていない履歴だけを表示"
-                  >
-                    エリア外({areaCounts[OUTSIDE_AREA_ID] || 0})
-                  </button>
+                    {GROUPS.map((g) => (
+                      <button
+                        key={g.key}
+                        onClick={() => selectOnlyGroup(g.categories)}
+                        style={{ ...s.filterTab, ...(isGroupActive(g.categories) ? s.filterTabActive : {}) }}
+                        title={`${g.label}の履歴だけを表示`}
+                      >
+                        {g.label}のみ({groupCounts[g.key] || 0})
+                      </button>
+                    ))}
+                    {CATEGORIES.map((cat) => (
+                      <button
+                        key={cat.key}
+                        onClick={() => toggleCategory(cat.key)}
+                        style={{
+                          ...s.filterTab,
+                          ...(selectedCategories.has(cat.key) ? s.filterTabActive : s.filterTabOff),
+                        }}
+                      >
+                        <span style={{ ...s.filterDot, background: cat.color }} />
+                        {cat.label}({categoryCounts[cat.key] || 0})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {zoneList.length > 0 && (
+                  <div style={s.filterRow}>
+                    <span style={s.filterRowLabel}>エリア</span>
+                    <div style={s.filterTabs}>
+                      <button
+                        onClick={selectAllAreas}
+                        style={{ ...s.filterTab, ...(selectedAreaId === null ? s.filterTabActive : {}) }}
+                      >
+                        すべてのエリア({allIncidents.length})
+                      </button>
+                      {zoneList.map((zone) => (
+                        <button
+                          key={zone.id}
+                          onClick={() => setSelectedAreaId(zone.id)}
+                          style={{
+                            ...s.filterTab,
+                            ...(selectedAreaId === zone.id ? s.filterTabActive : {}),
+                          }}
+                          title={`「${zone.label}」の範囲内で発生した履歴だけを表示`}
+                        >
+                          <span style={{ ...s.filterDot, background: zone.type === 'danger' ? '#f43f5e' : '#f59e0b' }} />
+                          {zone.label}({areaCounts[zone.id] || 0})
+                        </button>
+                      ))}
+                      <button
+                        onClick={() => setSelectedAreaId(OUTSIDE_AREA_ID)}
+                        style={{
+                          ...s.filterTab,
+                          ...(selectedAreaId === OUTSIDE_AREA_ID ? s.filterTabActive : {}),
+                        }}
+                        title="どのエリアの範囲にも入っていない履歴だけを表示"
+                      >
+                        エリア外({areaCounts[OUTSIDE_AREA_ID] || 0})
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </section>
+
+          <p style={s.desc}>
+            上の絞り込みバーで指定した条件に一致する履歴を、発生日時の新しい順に表示します。
+          </p>
+          <div style={s.list}>
+            {incidents.length === 0 && (
+              <p style={s.emptyNote}>
+                該当する履歴はありません。
+                <button style={s.linkBtn} onClick={resetAllFilters}>絞り込みをリセットする</button>
+              </p>
+            )}
+            {incidents.map((inc) => (
+              <div
+                key={inc.id}
+                style={{ ...s.row, ...(hoverId === inc.id ? s.rowHover : {}) }}
+                onMouseEnter={() => setHoverId(inc.id)}
+                onMouseLeave={() => setHoverId((h) => (h === inc.id ? null : h))}
+              >
+                <span style={{ ...s.rowDot, background: catColor[inc.category] || '#f43f5e' }} />
+                <div style={s.rowBody}>
+                  <div style={s.rowLabel}>
+                    {inc.severity === 'danger' ? '⚠' : '△'} {catLabel[inc.category] || ''} — {inc.label}
+                    {inc.approx && (
+                      <span
+                        style={s.approxBadge}
+                        title="カメラキャリブレーション行列が未受領のため、位置は部屋の中心に概算表示しています"
+                      >
+                        位置は概算
+                      </span>
+                    )}
+                  </div>
+                  <div style={s.rowTime}>{formatDateTime(inc.time)}({formatRelative(inc.time, nowMs)})</div>
                 </div>
               </div>
-            )}
-          </>
-        )}
-      </section>
+            ))}
+          </div>
+        </section>
 
-      <div style={s.grid}>
         <section style={s.card}>
           <div style={s.cardHeaderRow}>
             <h3 style={s.h3}>
@@ -645,45 +693,6 @@ export default function HistoryPage() {
               ROLE_C_SPEC_ALIGNMENT.mdを参照)。
             </p>
           )}
-        </section>
-
-        <section style={{ ...s.card, ...s.listCard }}>
-          <h3 style={s.h3}>履歴一覧({incidents.length}件)</h3>
-          <p style={s.desc}>
-            上の絞り込みバーで指定した条件に一致する履歴を、発生日時の新しい順に表示します。
-          </p>
-          <div style={s.list}>
-            {incidents.length === 0 && (
-              <p style={s.emptyNote}>
-                該当する履歴はありません。
-                <button style={s.linkBtn} onClick={resetAllFilters}>絞り込みをリセットする</button>
-              </p>
-            )}
-            {incidents.map((inc) => (
-              <div
-                key={inc.id}
-                style={{ ...s.row, ...(hoverId === inc.id ? s.rowHover : {}) }}
-                onMouseEnter={() => setHoverId(inc.id)}
-                onMouseLeave={() => setHoverId((h) => (h === inc.id ? null : h))}
-              >
-                <span style={{ ...s.rowDot, background: catColor[inc.category] || '#f43f5e' }} />
-                <div style={s.rowBody}>
-                  <div style={s.rowLabel}>
-                    {inc.severity === 'danger' ? '⚠' : '△'} {catLabel[inc.category] || ''} — {inc.label}
-                    {inc.approx && (
-                      <span
-                        style={s.approxBadge}
-                        title="カメラキャリブレーション行列が未受領のため、位置は部屋の中心に概算表示しています"
-                      >
-                        位置は概算
-                      </span>
-                    )}
-                  </div>
-                  <div style={s.rowTime}>{formatDateTime(inc.time)}({formatRelative(inc.time, nowMs)})</div>
-                </div>
-              </div>
-            ))}
-          </div>
         </section>
       </div>
     </div>

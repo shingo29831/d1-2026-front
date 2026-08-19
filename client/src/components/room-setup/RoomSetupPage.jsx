@@ -5,6 +5,7 @@ import { useTheme } from '../../themeContext';
 import { rectFootprint, lShapeFootprint, footprintBounds } from '../../roomShapes';
 import { exportLivingRoomAsGlb } from '../../exportRoomGlb';
 import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -269,12 +270,18 @@ export default function RoomSetupPage() {
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>部屋の設定</h2>
-      <p style={s.lead}>
-        見守りダッシュボードに表示する部屋の形を設定します。長方形・L字型・自由な多角形から選べるほか、
-        ②お手持ちのPolycamなどでスキャンしたGLTF/GLBファイルを読み込むこともできます。
-        変更はこの端末のブラウザに保存され、見守りダッシュボードにすぐ反映されます。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        部屋の設定
+        <InfoButton title="部屋の設定について">
+          見守りダッシュボードに表示する部屋の形を設定します。長方形・L字型・自由な多角形から選べるほか、
+          ②お手持ちのPolycamなどでスキャンしたGLTF/GLBファイルを読み込むこともできます。
+          変更はこの端末のブラウザに保存され、見守りダッシュボードにすぐ反映されます。
+        </InfoButton>
+      </h2>
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」という要望に合わせて、
           3列を明確に役割分担させている。左列=②で選んだ形をそのまま確認・編集できる

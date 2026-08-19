@@ -21,7 +21,7 @@ export const SOCKET_SERVER_URL =
 // 更新のたびに、日付が変わっていればNを1に戻し、同じ日ならNを+1してここを
 // 書き換えてください(自動採番ではなく、更新時に手動で更新する運用です)。
 // -------------------------------------------------------------------
-export const APP_VERSION = '08.19.5';
+export const APP_VERSION = '08.19.6';
 
 // YOLOv8-Poseの17キーポイントの接続順（COCO形式）
 export const SKELETON_CONNECTIONS = [

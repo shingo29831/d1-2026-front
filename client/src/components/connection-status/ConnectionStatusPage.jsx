@@ -8,6 +8,7 @@ import { checkHistoryApiConnectivity } from '../../historyApi';
 import { getSignedIotWebSocketUrl } from '../../iotClient';
 import { withTimeout } from '../../withTimeout';
 import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 // ===================================================================
 // 「接続状況」診断ページ。
@@ -217,11 +218,17 @@ export default function ConnectionStatusPage({
 
   return (
     <div style={{ padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' }}>
-      <h2 style={{ marginTop: 0, color: theme.textStrong, fontSize: 22 }}>接続状況</h2>
-      <p style={{ color: theme.textMuted, maxWidth: 1000, lineHeight: 1.7, fontSize: 14.5 }}>
-        AWS(Cognito・IoT Core・履歴API)および検出パイプライン(Webカメラ・見守りサーバー)との
-        接続状況をまとめて確認できるページです。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={{ marginTop: 0, color: theme.textStrong, fontSize: 22 }}>
+        接続状況
+        <InfoButton title="接続状況について">
+          AWS(Cognito・IoT Core・履歴API)および検出パイプライン(Webカメラ・見守りサーバー)との
+          接続状況をまとめて確認できるページです。
+        </InfoButton>
+      </h2>
 
       <div style={styles.grid}>
         {/* Cognito */}

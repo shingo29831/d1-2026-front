@@ -4,6 +4,7 @@ import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds, nearestEdgePoint, normalToYawDeg, yawDegToDir } from '../../roomShapes';
 import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -215,13 +216,19 @@ export default function CameraSetupPage() {
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>カメラ位置の設定</h2>
-      <p style={s.lead}>
-        見守りカメラを実際にどこへ設置するか決めるページです。「壁に固定」では間取り図内をクリックすると
-        一番近い壁にカメラが自動的に吸着して配置されます(実機は壁掛けカメラのため)。「自由配置」では
-        部屋の中の好きな位置にカメラを置き、向き(角度)を自由に回転させられます。視野角(FOV)と
-        見える範囲(距離)は水色の扇形で表示され、どちらもスライダーで調整できます。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        カメラ位置の設定
+        <InfoButton title="カメラ位置の設定について">
+          見守りカメラを実際にどこへ設置するか決めるページです。「壁に固定」では間取り図内をクリックすると
+          一番近い壁にカメラが自動的に吸着して配置されます(実機は壁掛けカメラのため)。「自由配置」では
+          部屋の中の好きな位置にカメラを置き、向き(角度)を自由に回転させられます。視野角(FOV)と
+          見える範囲(距離)は水色の扇形で表示され、どちらもスライダーで調整できます。
+        </InfoButton>
+      </h2>
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
           左列=間取り図(2D。カメラのドラッグ移動もここで行う)、中央列=3Dプレビュー

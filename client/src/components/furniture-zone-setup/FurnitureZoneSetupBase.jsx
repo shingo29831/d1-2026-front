@@ -5,6 +5,7 @@ import { useTheme } from '../../themeContext';
 import { footprintBounds, footprintEdges } from '../../roomShapes';
 import { isPositionBlocked } from '../../roomCollision';
 import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -178,8 +179,14 @@ export default function FurnitureZoneSetupBase({ kind, title, lead, icon }) {
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>{title}</h2>
-      <p style={s.lead}>{lead}</p>
+      {/* 【2026-08-19変更】以前はここに長い説明文(lead)を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        {title}
+        <InfoButton title={title}>{lead}</InfoButton>
+      </h2>
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
           左列=間取り図(2D。クリック/ドラッグでの追加・移動もここで行う)、

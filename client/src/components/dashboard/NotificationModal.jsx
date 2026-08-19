@@ -135,14 +135,17 @@ export default function NotificationModal({ notifications, onAck, onDismiss, onC
 
 function makeStyles(theme) {
   return {
-    // 画面下からせり上がるボトムシート形式(スマホでは片手操作で閉じやすいため)。
+    // 【2026-08-19変更】「通知のモーダルは画面の中央に表示してほしい」という
+    // ご要望を受け、以前の下からせり上がるボトムシート形式(alignItems:'flex-end')
+    // から、画面の縦横中央に表示する形式へ変更した。
     overlay: {
       position: 'fixed',
       inset: 0,
       background: 'rgba(0,0,0,0.5)',
       display: 'flex',
-      alignItems: 'flex-end',
+      alignItems: 'center',
       justifyContent: 'center',
+      padding: 16,
       zIndex: 1000,
     },
     card: {
@@ -150,12 +153,11 @@ function makeStyles(theme) {
       maxWidth: 480,
       maxHeight: '80vh',
       background: theme.panelBgAlt,
-      borderTopLeftRadius: 16,
-      borderTopRightRadius: 16,
+      borderRadius: 16,
       display: 'flex',
       flexDirection: 'column',
       overflow: 'hidden',
-      boxShadow: '0 -4px 24px rgba(0,0,0,0.25)',
+      boxShadow: '0 8px 32px rgba(0,0,0,0.3)',
     },
     headerRow: {
       display: 'flex',
