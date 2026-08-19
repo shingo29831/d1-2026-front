@@ -31,6 +31,16 @@ function defaultCustomStart() {
   return rectFootprint(3.6, 3.0);
 }
 
+function pointToSegmentDistanceSq(px, pz, ax, az, bx, bz) {
+  const l2 = (bx - ax) ** 2 + (bz - az) ** 2;
+  if (l2 === 0) return (px - ax) ** 2 + (pz - az) ** 2;
+  let t = ((px - ax) * (bx - ax) + (pz - az) * (bz - az)) / l2;
+  t = Math.max(0, Math.min(1, t));
+  const projX = ax + t * (bx - ax);
+  const projZ = az + t * (bz - az);
+  return (px - projX) ** 2 + (pz - projZ) ** 2;
+}
+
 // 「部屋の設定」タブ。
 // 【Role C仕様書 Step 2「React + Three.jsによる3D空間の構築」との対応】
 // ②のGLTF/GLBアップロードが、仕様書の「Polycamでスキャンした部屋の3Dモデルを
@@ -65,6 +75,9 @@ export default function RoomSetupPage() {
   const [exportBusy, setExportBusy] = useState(false);
   const [exportErr, setExportErr] = useState(null);
   const [exportDone, setExportDone] = useState(false);
+
+  const [editMode, setEditMode] = useState('move'); // 'add', 'move', 'delete'
+  const [dragIdx, setDragIdx] = useState(null);
 
   // 「自由な多角形」用の下絵(トレース用の間取り図画像)。実際の部屋の形には保存されない、
   // あくまで頂点をクリックする際の目安として画像をSVGの背景に薄く表示するための機能。
@@ -115,15 +128,120 @@ export default function RoomSetupPage() {
     return `${sx},${sy}`;
   }).join(' ');
 
-  const handleSvgClick = (e) => {
+  const handlePointerDown = (e) => {
     if (shapeType !== 'custom') return;
-    setSaved(false);
+    e.preventDefault();
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
     const sx = (e.clientX - rect.left) * (SVG_W / rect.width);
     const sy = (e.clientY - rect.top) * (SVG_H / rect.height);
     const { x, z } = svgToRoom(sx, sy);
-    setCustomPoints((prev) => [...prev, { x: Math.round(x * 20) / 20, z: Math.round(z * 20) / 20 }]);
+
+    // 既存の頂点との当たり判定 (SVG座標系で距離を計算)
+    let hitIdx = null;
+    for (let i = 0; i < customPoints.length; i++) {
+      const p = customPoints[i];
+      const pSvg = roomToSvg(p.x, p.z);
+      const distSq = (pSvg.sx - sx) ** 2 + (pSvg.sy - sy) ** 2;
+      if (distSq <= 144) { // 半径12px以内
+        hitIdx = i;
+        break;
+      }
+    }
+
+    if (editMode === 'delete') {
+      if (hitIdx !== null) removePoint(hitIdx);
+      return;
+    }
+
+    if (editMode === 'move') {
+      if (hitIdx !== null) {
+        setDragIdx(hitIdx);
+        svg.setPointerCapture(e.pointerId);
+      }
+      return;
+    }
+
+    if (editMode === 'add') {
+      if (hitIdx !== null) return; // 頂点上をクリックした場合は追加しない
+
+      const snapped = { x: Math.round(x * 20) / 20, z: Math.round(z * 20) / 20 };
+      setSaved(false);
+      setCustomPoints((prev) => {
+        if (prev.length < 3) return [...prev, snapped];
+
+        let minDistSq = Infinity;
+        let insertIdx = prev.length;
+
+        for (let i = 0; i < prev.length; i++) {
+          const p1 = prev[i];
+          const p2 = prev[(i + 1) % prev.length];
+          const distSq = pointToSegmentDistanceSq(snapped.x, snapped.z, p1.x, p1.z, p2.x, p2.z);
+          if (distSq < minDistSq) {
+            minDistSq = distSq;
+            insertIdx = i + 1;
+          }
+        }
+        const newPoints = [...prev];
+        newPoints.splice(insertIdx, 0, snapped);
+        return newPoints;
+      });
+    }
+  };
+
+  const handlePointerMove = (e) => {
+    if (shapeType !== 'custom' || dragIdx === null) return;
+    e.preventDefault();
+    const svg = e.currentTarget;
+    const rect = svg.getBoundingClientRect();
+    const sx = (e.clientX - rect.left) * (SVG_W / rect.width);
+    const sy = (e.clientY - rect.top) * (SVG_H / rect.height);
+    const { x, z } = svgToRoom(sx, sy);
+    
+    let targetX = Math.round(x * 20) / 20;
+    let targetZ = Math.round(z * 20) / 20;
+
+    setCustomPoints((prev) => {
+      const SNAP_DIST = 0.3; // 0.3m以内に近づいたらスナップ
+      let minDiffX = SNAP_DIST;
+      let snapX = targetX;
+      let minDiffZ = SNAP_DIST;
+      let snapZ = targetZ;
+
+      // 他の頂点のX, Z座標にスナップさせる（直角を作りやすくする）
+      for (let i = 0; i < prev.length; i++) {
+        if (i === dragIdx) continue;
+        const p = prev[i];
+        const diffX = Math.abs(targetX - p.x);
+        if (diffX < minDiffX) {
+          minDiffX = diffX;
+          snapX = p.x;
+        }
+        const diffZ = Math.abs(targetZ - p.z);
+        if (diffZ < minDiffZ) {
+          minDiffZ = diffZ;
+          snapZ = p.z;
+        }
+      }
+
+      const next = [...prev];
+      next[dragIdx] = { x: snapX, z: snapZ };
+      return next;
+    });
+    setSaved(false);
+  };
+
+  const handlePointerUp = (e) => {
+    if (dragIdx !== null) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+      setDragIdx(null);
+    }
+  };
+
+  const getSvgCursor = () => {
+    if (shapeType !== 'custom') return 'default';
+    if (editMode === 'move') return dragIdx !== null ? 'grabbing' : 'grab';
+    return 'default';
   };
 
   const removePoint = (idx) => {
@@ -144,7 +262,10 @@ export default function RoomSetupPage() {
   const handleShapeTypeChange = (type) => {
     setSaved(false);
     setShapeType(type);
-    if (type === 'custom' && customPoints.length < 3) setCustomPoints(defaultCustomStart());
+    if (type === 'custom') {
+      if (customPoints.length < 3) setCustomPoints(defaultCustomStart());
+      setEditMode('move');
+    }
   };
 
   const handleParamChange = (key, value) => {
@@ -289,11 +410,14 @@ export default function RoomSetupPage() {
       <div style={s.grid}>
         <div style={s.col}>
           <section style={s.card}>
-            <h3 style={s.h3}>間取り図{shapeType === 'custom' ? '(クリックして頂点を追加)' : '(プレビュー)'}</h3>
+            <h3 style={s.h3}>間取り図{shapeType === 'custom' ? '(編集)' : '(プレビュー)'}</h3>
             <svg
               width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-              style={{ ...s.svg, cursor: shapeType === 'custom' ? 'crosshair' : 'default' }}
-              onClick={handleSvgClick}
+              style={{ ...s.svg, cursor: getSvgCursor(), touchAction: 'none' }}
+              onPointerDown={handlePointerDown}
+              onPointerMove={handlePointerMove}
+              onPointerUp={handlePointerUp}
+              onPointerLeave={handlePointerUp}
             >
               <rect x={0} y={0} width={SVG_W} height={SVG_H} fill={s.svgBg} />
               {shapeType === 'custom' && bgImageUrl && (
@@ -316,7 +440,7 @@ export default function RoomSetupPage() {
                 return (
                   <circle
                     key={i} cx={sx} cy={sy} r={6} fill={theme.panelBg} stroke={theme.accent} strokeWidth={2}
-                    onClick={(e) => { e.stopPropagation(); removePoint(i); }} style={{ cursor: 'pointer' }}
+                    style={{ pointerEvents: 'none' }}
                   />
                 );
               })}
@@ -406,7 +530,16 @@ export default function RoomSetupPage() {
 
             {shapeType === 'custom' && (
               <>
-                <p style={s.hint}>右の間取り図をクリックして頂点を追加してください(3点以上で保存できます)。頂点(丸印)をクリックすると削除できます。</p>
+                <div style={s.modeTabs}>
+                  <button onClick={() => setEditMode('add')} style={{ ...s.modeTab, ...(editMode === 'add' ? s.modeTabActive : {}) }}>追加</button>
+                  <button onClick={() => setEditMode('move')} style={{ ...s.modeTab, ...(editMode === 'move' ? s.modeTabActive : {}) }}>移動</button>
+                  <button onClick={() => setEditMode('delete')} style={{ ...s.modeTab, ...(editMode === 'delete' ? s.modeTabActive : {}) }}>削除</button>
+                </div>
+                <p style={s.hint}>
+                  {editMode === 'add' && '間取り図をクリックして頂点を追加してください。辺の近くをクリックするとその間に挿入されます。'}
+                  {editMode === 'move' && '頂点をドラッグ＆ドロップして移動できます。'}
+                  {editMode === 'delete' && '削除したい頂点をクリックしてください。'}
+                </p>
                 <div style={s.btnRow}>
                   <button style={s.ghostBtn} onClick={undoPoint}>ひとつ戻す</button>
                   <button style={s.ghostBtn} onClick={restartPoints}>やり直す</button>
@@ -521,7 +654,7 @@ export default function RoomSetupPage() {
             )}
             <svg
               width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`}
-              style={{ ...s.svg, cursor: 'crosshair' }}
+              style={{ ...s.svg, cursor: 'crosshair', touchAction: 'none' }}
               onClick={handleWallSvgClick}
             >
               <rect x={0} y={0} width={SVG_W} height={SVG_H} fill={s.svgBg} />
@@ -597,6 +730,9 @@ function makeStyles(theme, isMobile) {
     shapeTabs: { display: 'flex', gap: 8, marginBottom: 16 },
     shapeTab: { flex: 1, fontSize: 13, padding: '10px 8px', borderRadius: 8, border: `1px solid ${theme.borderSoft}`, background: 'transparent', color: theme.textMuted, cursor: 'pointer' },
     shapeTabActive: { background: theme.accentSoft, color: theme.accent, borderColor: theme.accentBorder },
+    modeTabs: { display: 'flex', gap: 8, marginBottom: 12 },
+    modeTab: { flex: 1, fontSize: 13, padding: '8px', borderRadius: 6, border: `1px solid ${theme.borderSoft}`, background: 'transparent', color: theme.textMuted, cursor: 'pointer', textAlign: 'center' },
+    modeTabActive: { background: theme.accentSoft, color: theme.accent, borderColor: theme.accentBorder, fontWeight: 'bold' },
     fieldRow: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 },
     fieldLabel: { width: 100, fontSize: 13.5, color: theme.textMuted },
     numInput: { flex: 1, background: theme.inputBg, border: `1px solid ${theme.borderSoft}`, borderRadius: 6, color: theme.text, padding: '8px 10px', fontSize: 14 },

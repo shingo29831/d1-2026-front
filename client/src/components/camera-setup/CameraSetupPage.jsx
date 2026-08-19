@@ -39,8 +39,8 @@ function clamp(v, lo, hi) {
 // 受けてcameraRangeM(roomConfigContext.jsx)として独立に調整できるようにした。
 export default function CameraSetupPage() {
   const {
-    footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, zones,
-    setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange, defaults,
+    footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraRangeM, cameraMode, cameraResolution, zones,
+    setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange, setCameraResolution, defaults,
   } = useRoomConfig();
   const { theme } = useTheme();
   const { isMobile } = useViewport();
@@ -51,6 +51,7 @@ export default function CameraSetupPage() {
   const [draftFov, setDraftFov] = useState(cameraFovDeg);
   const [draftRange, setDraftRange] = useState(cameraRangeM);
   const [draftMode, setDraftMode] = useState(cameraMode || 'wall');
+  const [draftResolution, setDraftResolution] = useState(cameraResolution);
   const [saved, setSaved] = useState(false);
   const [previewMode, setPreviewMode] = useState('overview');
 
@@ -174,11 +175,22 @@ export default function CameraSetupPage() {
     setDraftRange(Number(value));
   };
 
+  const handleResolutionWidthChange = (value) => {
+    setSaved(false);
+    setDraftResolution((prev) => ({ ...prev, width: Number(value) }));
+  };
+
+  const handleResolutionHeightChange = (value) => {
+    setSaved(false);
+    setDraftResolution((prev) => ({ ...prev, height: Number(value) }));
+  };
+
   const handleSave = () => {
     setCameraPlacement(draftMount, draftYaw, draftMode);
     setCameraPitch(draftPitch);
     setCameraFov(draftFov);
     setCameraRange(draftRange);
+    setCameraResolution(draftResolution);
     setSaved(true);
   };
 
@@ -189,10 +201,12 @@ export default function CameraSetupPage() {
     setDraftFov(defaults.cameraFovDeg);
     setDraftRange(defaults.cameraRangeM);
     setDraftMode('wall');
+    setDraftResolution(defaults.cameraResolution);
     setCameraPlacement(defaults.cameraMount, defaults.cameraYawDeg, 'wall');
     setCameraPitch(defaults.cameraPitchDeg);
     setCameraFov(defaults.cameraFovDeg);
     setCameraRange(defaults.cameraRangeM);
+    setCameraResolution(defaults.cameraResolution);
     setSaved(false);
   };
 
@@ -334,6 +348,26 @@ export default function CameraSetupPage() {
             </div>
 
             <div style={s.fieldRow}>
+              <span style={s.fieldLabel}>解像度</span>
+              <div style={s.resolutionInputs}>
+                <input
+                  type="number" min={100} max={8000} step={1}
+                  value={draftResolution.width}
+                  onChange={(e) => handleResolutionWidthChange(e.target.value)}
+                  style={s.numberInput}
+                />
+                <span style={s.resolutionCross}>x</span>
+                <input
+                  type="number" min={100} max={8000} step={1}
+                  value={draftResolution.height}
+                  onChange={(e) => handleResolutionHeightChange(e.target.value)}
+                  style={s.numberInput}
+                />
+              </div>
+            </div>
+            <p style={s.hint}>実際のカメラの解像度(幅x高さ)をピクセル単位で入力してください。解像度が異なると距離の計算がずれる原因になります。</p>
+
+            <div style={s.fieldRow}>
               <span style={s.fieldLabel}>高さ</span>
               <input
                 type="range" min={HEIGHT_LIMITS.min} max={HEIGHT_LIMITS.max} step={HEIGHT_LIMITS.step}
@@ -418,6 +452,9 @@ function makeStyles(theme, isMobile) {
     fieldRow: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 },
     fieldLabel: { width: 48, fontSize: 13.5, color: theme.textMuted },
     range: { flex: 1 },
+    resolutionInputs: { flex: 1, display: 'flex', alignItems: 'center', gap: 6 },
+    numberInput: { width: 70, padding: '6px 8px', borderRadius: 6, border: `1px solid ${theme.borderSoft}`, background: theme.panelBg, color: theme.text, textAlign: 'center', fontSize: 13.5 },
+    resolutionCross: { color: theme.textMuted, fontSize: 13 },
     unit: { fontSize: 13, color: theme.accent, width: 48, textAlign: 'right' },
     btnRow: { display: 'flex', gap: 10, marginTop: 16 },
     primaryBtn: { padding: '10px 18px', fontSize: 13.5, fontWeight: 700, background: theme.accent, color: theme.mode === 'dark' ? '#04222a' : '#ffffff', border: `1px solid ${theme.accentBorder}`, borderRadius: 8, cursor: 'pointer' },

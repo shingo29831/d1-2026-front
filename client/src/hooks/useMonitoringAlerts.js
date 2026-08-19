@@ -29,7 +29,7 @@ const HAZARD_MARKER_LIFETIME_MS = 15000;
  * を検出し、動画のUIのような通知リストを生成する。
  */
 export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage) {
-  const { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, zones, doorSensors } = useRoomConfig();
+  const { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution, zones, doorSensors } = useRoomConfig();
   const [notifications, setNotifications] = useState([]);
   const [statusText, setStatusText] = useState('待機中');
   const [primaryPerson, setPrimaryPerson] = useState(null);
@@ -51,6 +51,7 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   const lostFiredAt = useRef(0);
   const lastKnownPositionRef = useRef({ x: null, z: null, time: 0 });
   const personStatesRef = useRef({}); // { personIndex: state }
+  const iotPoseRef = useRef({ keypoints: null, localTime: 0 }); // 本番環境での最新姿勢データ保持用
 
   // 【重要】poseData/lastPoseAt/connectedは毎フレーム(検出間隔によっては300msより
   // 短い周期で)新しい値になるため、下の評価用setIntervalの依存配列に直接含めると、
@@ -71,14 +72,14 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   // カメラの向きと、実際に人物が表示される位置がズレる」不具合の原因になって
   // いた(向き(yaw)自体は反映されるが、上下角度・視野角の設定が無視される
   // ため、特に上下角度がずれるほど検出位置の誤差が大きくなる)。
-  const roomConfigRef = useRef({ footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg });
+  const roomConfigRef = useRef({ footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution });
   const zonesRef = useRef(zones);
   useEffect(() => { poseDataRef.current = poseData; }, [poseData]);
   useEffect(() => { lastPoseAtRef.current = lastPoseAt; }, [lastPoseAt]);
   useEffect(() => { connectedRef.current = connected; }, [connected]);
   useEffect(() => {
-    roomConfigRef.current = { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg };
-  }, [footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg]);
+    roomConfigRef.current = { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution };
+  }, [footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution]);
   useEffect(() => { zonesRef.current = zones; }, [zones]);
 
   // 【重要】戻り値として、実際に通知が発生した場合のみそのidを返す
@@ -149,14 +150,14 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
     // 重複通知を防ぐため、メッセージのタイムスタンプをキーに含める
     const msgKey = `${event_type}_${timestamp}`;
 
-    if (event_type === 'ai_hazard') {
-      let hazardType = details.hazard_type;
+    if (event_type === 'ai_hazard' || event_type === 'normal') {
+      let hazardType = details.hazard_type || 'none';
       let precalculatedFloor = null;
 
       // 【不具合修正】エッジ側からの誤判定(顔面アップ時の横長バウンディングボックスによる転倒判定)を
       // フロントエンド側で再検証して弾く。また、足元基準の正確な3D座標を算出する。
       let isFalsePositive = false;
-      const now = Date.now();
+      const eventTime = timestamp || Date.now();
 
       // --- 速度チェック ---
       if (details.x != null && details.y != null) {
@@ -166,8 +167,10 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
         if (precalculatedFloor) {
           const lastPos = lastKnownPositionRef.current;
           if (lastPos.time > 0) {
-            const dt = (now - lastPos.time) / 1000;
-            if (dt > 0 && dt < 5.0) { // 過去5秒以内のデータと比較
+            // イベントのタイムスタンプを使って正確な経過時間を計算
+            const dt = (eventTime - lastPos.time) / 1000;
+            // dtが小さすぎる場合（ネットワーク遅延等による同時到達）はノイズ判定をスキップ
+            if (dt > 0.1 && dt < 5.0) { 
               const dx = precalculatedFloor.x - lastPos.x;
               const dz = precalculatedFloor.z - lastPos.z;
               const dist = Math.sqrt(dx * dx + dz * dz);
@@ -229,7 +232,16 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
       }
 
       if (precalculatedFloor) {
-        lastKnownPositionRef.current = { x: precalculatedFloor.x, z: precalculatedFloor.z, time: now };
+        lastKnownPositionRef.current = { x: precalculatedFloor.x, z: precalculatedFloor.z, time: eventTime };
+      }
+
+      // 本番環境での3Dモデル表示用に最新のキーポイントを保存
+      if (details.keypoints && Array.isArray(details.keypoints)) {
+        iotPoseRef.current = { keypoints: details.keypoints, localTime: Date.now() };
+      }
+
+      if (event_type === 'normal') {
+        return; // normalの場合は通知やマーカー追加は行わない
       }
 
       // 【本番環境: 一時的な人物マーカー】仕様書には継続的な姿勢ストリームが
@@ -370,12 +382,22 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   useEffect(() => {
     const evalInterval = setInterval(() => {
       const now = Date.now();
-      const poseData = poseDataRef.current;
-      const lastPoseAt = lastPoseAtRef.current;
+      let poseData = poseDataRef.current;
+      let lastPoseAt = lastPoseAtRef.current;
       const connected = connectedRef.current;
+      let isIotPose = false;
+
+      // 本番環境（poseDataがnull）の場合、IoTから受信した最新の姿勢データを使用する
+      if (!poseData && iotPoseRef.current.localTime > 0) {
+        poseData = { keypoints: [iotPoseRef.current.keypoints] };
+        lastPoseAt = iotPoseRef.current.localTime;
+        isIotPose = true;
+      }
 
       // --- 1. カメラの範囲からの消失 判定 ---
-      const noRecentPose = !lastPoseAt || now - lastPoseAt > THRESHOLDS.LOST_TIMEOUT_MS;
+      // 1秒おきのデータ送信に対応するため、IoT経由の場合はタイムアウトを3000msに延長する
+      const timeoutMs = isIotPose ? 3000 : THRESHOLDS.LOST_TIMEOUT_MS;
+      const noRecentPose = !lastPoseAt || now - lastPoseAt > timeoutMs;
       const roomConfig = roomConfigRef.current;
       const persons = poseData && Array.isArray(poseData.keypoints)
         ? poseData.keypoints.map((kpts, idx) => {
