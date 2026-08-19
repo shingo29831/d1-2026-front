@@ -3,6 +3,8 @@ import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds } from '../../roomShapes';
+import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -31,6 +33,7 @@ export default function DoorSensorSetupPage() {
     addDoorSensor, updateDoorSensor, removeDoorSensor, resetDoorSensors,
   } = useRoomConfig();
   const { theme } = useTheme();
+  const { isMobile } = useViewport();
 
   const [selectedId, setSelectedId] = useState(null);
   const svgRef = useRef(null);
@@ -105,19 +108,25 @@ export default function DoorSensorSetupPage() {
     setDragPos(null);
   };
 
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>開閉センサーの設定</h2>
-      <p style={s.lead}>
-        玄関・勝手口などに取り付ける開閉センサー(仕様書の共通JSONスキーマにおける
-        <code style={s.code}>sensor_type: "door"</code>)を、間取り図上のどこに設置したかと、
-        実機と対応する device_id を登録・管理するページです。間取り図の何もない場所をクリックすると
-        新しく追加されます。一覧から項目を選んでから間取り図をクリックすると、その項目をクリックした
-        位置へ移動できます。「状態」は実際にはRole A側のセンサー本体から届くイベントで自動更新される
-        想定ですが、この画面からもテスト用に手動で切り替えられます。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        開閉センサーの設定
+        <InfoButton title="開閉センサーの設定について">
+          玄関・勝手口などに取り付ける開閉センサー(仕様書の共通JSONスキーマにおける
+          <code style={s.code}>sensor_type: "door"</code>)を、間取り図上のどこに設置したかと、
+          実機と対応する device_id を登録・管理するページです。間取り図の何もない場所をクリックすると
+          新しく追加されます。一覧から項目を選んでから間取り図をクリックすると、その項目をクリックした
+          位置へ移動できます。「状態」は実際にはRole A側のセンサー本体から届くイベントで自動更新される
+          想定ですが、この画面からもテスト用に手動で切り替えられます。
+        </InfoButton>
+      </h2>
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
           左列=間取り図(2D。クリック/ドラッグでの追加・移動もここで行う)、
@@ -212,7 +221,11 @@ export default function DoorSensorSetupPage() {
         </section>
         </div>
 
-        <div style={s.col}>
+        {/* 【2026-08-19変更】「各設定項目の3Dプレビューは一番下に表示してほしい」
+            というご要望を受け、スマホ幅(縦積み)のときだけこの列を一番下に回す。
+            デスクトップでは元通り中央列のまま(CSS Gridのorderプロパティで見た目の
+            順序だけ変える)。 */}
+        <div style={{ ...s.col, order: isMobile ? 3 : 2 }}>
         <section style={s.card}>
           <h3 style={s.h3}>3Dプレビュー</h3>
           <p style={s.desc}>緑=閉、赤=開。配置・編集した内容は保存操作なしですぐにここと見守りダッシュボードに反映されます。</p>
@@ -222,7 +235,7 @@ export default function DoorSensorSetupPage() {
         </section>
         </div>
 
-        <div style={s.col}>
+        <div style={{ ...s.col, order: isMobile ? 2 : 3 }}>
         <section style={s.card}>
           <h3 style={s.h3}>🚪 開閉センサー一覧({doorSensors.length})</h3>
           {doorSensors.length === 0 && <p style={s.emptyNote}>まだ開閉センサーがありません。上の間取り図をクリックして追加してください。</p>}
@@ -274,11 +287,11 @@ function SensorRow({ item, s, selected, onSelect, onChange, onRemove }) {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 12px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
@@ -286,10 +299,10 @@ function makeStyles(theme) {
       background: theme.panelBgAlt, border: `1px solid ${theme.borderSoft}`, borderRadius: 5,
       padding: '1px 6px', fontSize: 13, color: theme.accent,
     },
-    // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
-    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
-    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
+    // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。スマホ幅では1列に潰す。
+    grid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? 14 : 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: isMobile ? 14 : 20, minWidth: 0 },
+    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: isMobile ? 14 : 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     svg: { background: svgBg, borderRadius: 10, width: '100%', height: 'auto' },
     btnRow: { display: 'flex', gap: 10, marginTop: 16, flexWrap: 'wrap' },

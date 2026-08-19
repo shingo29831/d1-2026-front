@@ -2,6 +2,7 @@ import React, { useMemo, useRef, useState } from 'react';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
+import { useViewport } from '../../hooks/useViewport';
 import { footprintBounds } from '../../roomShapes';
 import {
   CATEGORIES,
@@ -11,6 +12,7 @@ import {
   removeIncident,
   resetIncidents,
 } from '../../incidentHistory';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -63,6 +65,7 @@ export default function IncidentDataEditorPage() {
   const { footprint, furniture, zones } = useRoomConfig();
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
+  const { isMobile } = useViewport();
 
   const [incidents, setIncidents] = useState(() => getEditableIncidents());
   const refresh = () => setIncidents(getEditableIncidents());
@@ -148,7 +151,7 @@ export default function IncidentDataEditorPage() {
     setDragPos(null);
   };
 
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   const sortedIncidents = useMemo(
     () => [...incidents].sort((a, b) => new Date(b.time) - new Date(a.time)),
@@ -158,20 +161,28 @@ export default function IncidentDataEditorPage() {
   if (isProduction) {
     return (
       <div style={s.page}>
-        <h2 style={s.h2}>危険行為履歴データの編集</h2>
-        <p style={s.lead}>
-          このページはデモ用データモード専用です。本番環境モードでは、危険行為の履歴はAWS(履歴API・IoT Core)から取得した実データのみを扱うため、ここでの編集はできません。編集するには、ハンバーガーメニューから「デモ用データ」モードに切り替えてください。
-        </p>
+        <h2 style={s.h2}>
+          危険行為履歴データの編集
+          <InfoButton title="危険行為履歴データの編集について">
+            このページはデモ用データモード専用です。本番環境モードでは、危険行為の履歴はAWS(履歴API・IoT Core)から取得した実データのみを扱うため、ここでの編集はできません。編集するには、ハンバーガーメニューから「デモ用データ」モードに切り替えてください。
+          </InfoButton>
+        </h2>
       </div>
     );
   }
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>危険行為履歴データの編集</h2>
-      <p style={s.lead}>
-        デモ用データモードで表示する「危険行為の履歴」ページのサンプルデータ(AIリスクサジェスト「普段行かない場所へのアクセス」を含む)を、自由に追加・編集・削除できます。ここでの変更はこの端末のブラウザに保存され、「危険行為の履歴」ページや見守りダッシュボードのヒートマップにそのまま反映されます(履歴API接続時の実データには影響しません)。間取り図の何もない場所をクリックすると、新しい項目(既定は転倒検知)を追加します。一覧または間取り図上の項目を選択してから間取り図をクリックすると、その項目をクリックした位置へ移動できます。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        危険行為履歴データの編集
+        <InfoButton title="危険行為履歴データの編集について">
+          デモ用データモードで表示する「危険行為の履歴」ページのサンプルデータ(AIリスクサジェスト「普段行かない場所へのアクセス」を含む)を、自由に追加・編集・削除できます。ここでの変更はこの端末のブラウザに保存され、「危険行為の履歴」ページや見守りダッシュボードのヒートマップにそのまま反映されます(履歴API接続時の実データには影響しません)。間取り図の何もない場所をクリックすると、新しい項目(既定は転倒検知)を追加します。一覧または間取り図上の項目を選択してから間取り図をクリックすると、その項目をクリックした位置へ移動できます。
+        </InfoButton>
+      </h2>
 
       <div style={s.grid}>
         <div style={s.col}>
@@ -333,15 +344,15 @@ function IncidentRow({ item, s, selected, onSelect, onChange, onRemove }) {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 12px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
-    grid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20, alignItems: 'start' },
+    grid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : '1fr 1fr', gap: isMobile ? 14 : 20, alignItems: 'start' },
     col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
     card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },

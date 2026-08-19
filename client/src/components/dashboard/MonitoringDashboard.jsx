@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import StatusBar from './StatusBar';
 import NotificationPanel from './NotificationPanel';
+import NotificationModal from './NotificationModal';
 import KeyLegendOverlay from './KeyLegendOverlay';
 import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
@@ -12,6 +13,7 @@ import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
 import { getIncidentsSortedDesc } from '../../incidentHistory';
 import { fetchIncidentsSortedDesc } from '../../historyApi';
+import { useViewport } from '../../hooks/useViewport';
 
 const DUMMY_STEP_M = 0.15; // 矢印キー1回あたりの移動量
 let dummyIdSeq = 0;
@@ -50,6 +52,9 @@ export default function MonitoringDashboard({
   const [viewMode, setViewMode] = useState('overview'); // 'overview' | 'pov'
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
+  // 【2026-08-19追加: スマホ対応】スマホ幅では3Dシーンと通知パネルを横並びに
+  // すると狭すぎて両方潰れてしまうため、シーンを上・通知パネルを下に縦積みへ切り替える。
+  const { isMobile } = useViewport();
   const { footprint, zones, walls, furniture, roomShapeType, cameraMount, cameraYawDeg } = useRoomConfig();
 
   // --------------------------------------------------------------
@@ -61,6 +66,11 @@ export default function MonitoringDashboard({
   // IncidentHeatmap3D.jsx)と同じロジック(incidentHeatmap.js)を使う。
   // --------------------------------------------------------------
   const [showHeatmap, setShowHeatmap] = useState(false);
+  // 【2026-08-19追加】スマホ幅で「通知」ボタン(StatusBar.jsx)を押したときに
+  // 危険通知・AIリスクサジェストをモーダル(NotificationModal.jsx)で表示する
+  // ための開閉状態。デスクトップでは従来通り右側に常時パネル(NotificationPanel.jsx)
+  // を表示するため、このモーダルはスマホ幅のときだけ使う(下記のJSX参照)。
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
   // 【重要】本番環境モードでは、取得に失敗してもサンプルデータへフォールバック
   // しない(historyApi.js参照)。ここは背景に重ねる補助的なヒートマップのため
   // 専用のエラー表示までは出さないが、取得できなかった場合はincidents:[]の
@@ -209,6 +219,15 @@ export default function MonitoringDashboard({
     setSelectedDummyId(null);
     dummyZoneMembership.current = {};
   }, []);
+
+  // 【2026-08-19追加】本番環境に切り替えた瞬間に「ダミーを置く」機能そのものを
+  // 非表示にする(StatusBar.jsx側)だけでなく、デモ中に既に置いていたダミーが
+  // 本番環境の画面に残ったまま表示され続けることも避けたいため、本番環境へ
+  // 切り替わったタイミングで既存のダミーもまとめて消しておく。
+  useEffect(() => {
+    if (isProduction) clearDummies();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isProduction]);
 
   // ダミーが移動して危険/注意エリアに入ったら、実際のYOLO検出時と同じように
   // 自動で危険通知を発生させる(矢印キーでの移動に連動)。数字キー3〜9による
@@ -457,9 +476,12 @@ export default function MonitoringDashboard({
 
   const styles = useMemo(() => ({
     page: { display: 'flex', flexDirection: 'column', height: '100%', background: theme.appBg },
-    body: { flex: 1, display: 'flex', minHeight: 0 },
-    sceneWrap: { flex: 1, position: 'relative' },
-  }), [theme]);
+    // スマホ幅では縦積み(column)、それ以外は従来通り横並び(row)。
+    body: { flex: 1, display: 'flex', flexDirection: isMobile ? 'column' : 'row', minHeight: 0, overflowY: isMobile ? 'auto' : 'visible' },
+    // スマホ幅では高さを固定して確保しないと3Dシーンが潰れてしまうため、
+    // 縦積み時は画面の半分程度の高さを確保しておく。
+    sceneWrap: { flex: isMobile ? '0 0 auto' : 1, position: 'relative', height: isMobile ? '55vh' : 'auto', minHeight: isMobile ? 320 : 0 },
+  }), [theme, isMobile]);
 
   // 数字キー(1〜9)と危険行為の対応表(現在のzones設定に応じて動的に生成する)。
   // KeyLegendOverlay(見守りシーン上に常時表示するパネル)とStatusBarの
@@ -490,7 +512,10 @@ export default function MonitoringDashboard({
         hasPerson={hasPerson}
         confidencePct={confidencePct}
         personCount={personCount}
-        statusText={isLost ? '検出待ち' : statusText}
+        // 【2026-08-19追加】本番環境では継続的な姿勢ストリームが無く常時isLost=trueに
+        // なるため、以前はここが常に「検出待ち」のまま固定表示されてしまっていた。
+        // 本番環境では意味のない表示のため、あえて空にしてStatusBar側で非表示にする。
+        statusText={isLost ? (isProduction ? '' : '検出待ち') : statusText}
         viewMode={viewMode}
         onViewModeChange={setViewMode}
         inputMode={inputMode}
@@ -503,6 +528,8 @@ export default function MonitoringDashboard({
         dummyKeyHelp={dummyKeyHelp}
         heatmapOn={showHeatmap}
         onToggleHeatmap={toggleHeatmap}
+        notificationCount={notifications.length}
+        onOpenNotifications={() => setShowNotificationModal(true)}
       />
       <div style={styles.body}>
         <div style={styles.sceneWrap}>
@@ -512,40 +539,18 @@ export default function MonitoringDashboard({
             showHeatmap={showHeatmap}
             heatmapIncidents={heatmapIncidents}
             riskSuggestions={riskSuggestions}
+            // 【2026-08-19追加】「カメラ視点」ボタンを押した後にユーザーが3Dプレビューを
+            // 直接ドラッグして視点を動かしたら、ボタンのハイライトを解除するため、
+            // 自由視点(overview)へ戻す。RoomScene.jsx側のCameraRig(OrbitControlsの
+            // onStart)から、ユーザー操作由来のときだけ呼ばれる。
+            onUserOrbit={() => setViewMode('overview')}
           />
           {selectedDummyId && <KeyLegendOverlay items={keyLegendItems} flashKey={flashKey} />}
-          
-          {/* AIリスクサジェストUI */}
-          {riskSuggestions.length > 0 && (
-            <div style={{
-              position: 'absolute',
-              top: 16,
-              left: 16,
-              background: theme.surface || 'rgba(255, 255, 255, 0.9)',
-              border: `1px solid ${theme.border || '#ccc'}`,
-              borderRadius: '8px',
-              padding: '12px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-              zIndex: 10,
-              maxWidth: '320px',
-              pointerEvents: 'none'
-            }}>
-              <h4 style={{ margin: '0 0 8px 0', color: theme.warning || '#f59e0b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <i className="fa-solid fa-lightbulb"></i>
-                AIリスクサジェスト
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {riskSuggestions.slice(0, 3).map(s => (
-                  <div key={s.id} style={{ fontSize: '13px', color: theme.text || '#333' }}>
-                    <div style={{ fontWeight: 'bold' }}>{s.label}</div>
-                    <div style={{ fontSize: '11px', color: theme.textMuted || '#666' }}>
-                      {new Date(s.time).toLocaleString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
+          {/* 【2026-08-19変更】以前はここ(3Dシーンの上)に「AIリスクサジェスト」を
+              浮かせて表示していたが、「危険通知とAIリスクサジェストで分けて表示して
+              ほしい」というご要望を受け、右側(スマホでは下側)のNotificationPanel内の
+              別セクションへ移した(riskSuggestionsをそのまま渡すだけでよい)。 */}
 
           {/* デモ時のWebカメラ映像表示UI */}
           {shouldCapture && (
@@ -584,7 +589,7 @@ export default function MonitoringDashboard({
                 data-dashboard="true"
                 style={{
                   display: isCameraExpanded ? 'block' : 'none',
-                  width: '320px',
+                  width: isMobile ? 'min(320px, calc(100vw - 64px))' : '320px',
                   height: '240px',
                   background: '#000',
                   borderRadius: '8px',
@@ -597,13 +602,33 @@ export default function MonitoringDashboard({
             </div>
           )}
         </div>
+        {/* 【2026-08-19変更】スマホ幅では、3Dシーンの高さが固定(55vh)のため、
+            通知パネルを外すとその下が単なる空白になってしまっていた
+            (「3Dプレビューの下が余白になっているので危険行為をここに表示して
+            ほしい」というご指摘)。「通知」ボタン→モーダルはそのまま残しつつ
+            (AIリスクサジェストも含めた全件をいつでも確認できる)、この空いた
+            場所には危険通知だけを常時表示する(riskSuggestionsを渡さないことで
+            NotificationPanel.jsx側のAIリスクサジェスト欄は自動的に非表示になる。
+            AIリスクサジェストの一覧は引き続き「通知」ボタンのモーダル側で確認する)。
+            デスクトップでは従来通り、危険通知・AIリスクサジェストの両方を常時表示する。 */}
         <NotificationPanel
           notifications={notifications}
           onAck={acknowledgeNotification}
           onDismiss={dismissNotification}
           onClearAll={clearAll}
+          riskSuggestions={isMobile ? [] : riskSuggestions}
         />
       </div>
+      {isMobile && showNotificationModal && (
+        <NotificationModal
+          notifications={notifications}
+          onAck={acknowledgeNotification}
+          onDismiss={dismissNotification}
+          onClearAll={clearAll}
+          riskSuggestions={riskSuggestions}
+          onClose={() => setShowNotificationModal(false)}
+        />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
+import { useViewport } from '../../hooks/useViewport';
 
 // 各ページに group('user'=利用者画面 / 'admin'=管理画面)を持たせ、メニュー内で
 // タブ切り替えして表示する。
@@ -10,8 +11,11 @@ import { useOperationMode } from '../../operationModeContext';
 //                  住環境に合わせて調整する画面
 //   ・管理画面   … 接続状況の確認やYOLO/Polycamの動作確認など、設置時や
 //                  メンテナンス時にエンジニアが使う画面
-// (家具・エリアの設定は、以前は1画面にまとめていたが「家具の設定」と
-// 「エリアの設定」の2画面に分割した)
+// 【2026-08-19: スマホ対応の大改良で画面遷移を削減】以前は「部屋の設定」
+// 「カメラ位置の設定」「家具の設定」「エリアの設定」「開閉センサーの設定」の
+// 5項目がそれぞれ別ページだったが、「画面遷移は少なく、使いやすいように」と
+// いうご要望を受け、1つの「各種設定」ページ(SettingsPage.jsx)内のタブ切り替え
+// にまとめた。メニュー側はこの1項目を選ぶだけでよくなっている。
 const PAGES = [
   { id: 'dashboard', label: '見守りダッシュボード', desc: '3Dルームでの見守りモニター', group: 'user' },
   { id: 'history', label: '危険行為の履歴', desc: '転倒・危険エリアへの接近の履歴とヒートマップ', group: 'user' },
@@ -22,11 +26,7 @@ const PAGES = [
   // AWSからの実データのみで扱うべきのため、メニュー自体から隠す
   // (renderDrawerContents()内のvisiblePagesの絞り込みでisProductionを見ている)。
   { id: 'historyDataEdit', label: '危険行為履歴データの編集', desc: 'デモ用データ(AIリスクサジェスト「普段行かない場所へのアクセス」含む)を追加・編集・削除', group: 'admin', demoOnly: true },
-  { id: 'roomSetup', label: '部屋の設定', desc: '形とサイズを入力、またはGLTF/GLBを読み込んで部屋を作成', group: 'user' },
-  { id: 'cameraSetup', label: 'カメラ位置の設定', desc: '間取り図でカメラの設置位置・向き・視野角を決める', group: 'user' },
-  { id: 'furnitureSetup', label: '家具の設定', desc: '家具(箱)を自由に配置', group: 'user' },
-  { id: 'zoneSetup', label: 'エリアの設定', desc: '危険・注意エリアを自由に配置', group: 'user' },
-  { id: 'doorSensorSetup', label: '開閉センサーの設定', desc: '玄関・勝手口などの開閉センサーを間取り図上に配置', group: 'user' },
+  { id: 'settings', label: '各種設定', desc: '部屋・カメラ位置・家具・エリア・開閉センサーをタブで切り替えて設定', group: 'user' },
   { id: 'connectionStatus', label: '接続状況', desc: 'AWS(Cognito・IoT Core・履歴API)やカメラ等の接続状態を確認', group: 'admin' },
   { id: 'yolo', label: 'YOLOの起動・動作確認', desc: 'Webカメラ/動画とYOLOv8-Poseの疎通確認', group: 'admin' },
   { id: 'polycam', label: 'Polycamの動作確認', desc: 'スキャンしたGLTF/GLBの読み込み確認', group: 'admin' },
@@ -49,7 +49,8 @@ export default function HamburgerMenu({ currentPage, onNavigate, connected, embe
   const [activeGroup, setActiveGroup] = useState(() => groupOf(currentPage));
   const { theme, mode, toggleTheme } = useTheme();
   const { isProduction, toggleOperationMode } = useOperationMode();
-  const styles = useMemo(() => makeStyles(theme, embedded), [theme, embedded]);
+  const { isMobile } = useViewport();
+  const styles = useMemo(() => makeStyles(theme, embedded, isMobile), [theme, embedded, isMobile]);
   const visiblePages = useMemo(
     () => PAGES.filter((p) => p.group === activeGroup && (!p.demoOnly || !isProduction)),
     [activeGroup, isProduction],
@@ -178,12 +179,13 @@ export default function HamburgerMenu({ currentPage, onNavigate, connected, embe
   }
 }
 
-function makeStyles(theme, embedded) {
+function makeStyles(theme, embedded, isMobile) {
   return {
     hamburgerButton: embedded
       ? {
-        width: 40,
-        height: 40,
+        // スマホではタップ領域を44px相当まで広げる。
+        width: isMobile ? 44 : 40,
+        height: isMobile ? 44 : 40,
         borderRadius: 10,
         border: `1px solid ${theme.borderSoft}`,
         background: 'transparent',
@@ -238,13 +240,15 @@ function makeStyles(theme, embedded) {
       top: 0,
       left: 0,
       bottom: 0,
-      width: 300,
+      // 極端に狭い画面(300px未満)でもはみ出さないよう、300pxと画面幅の88%の
+      // 小さい方を採用する。
+      width: 'min(300px, 88vw)',
       background: theme.panelBg,
       borderRight: `1px solid ${theme.border}`,
       zIndex: 1011,
       display: 'flex',
       flexDirection: 'column',
-      padding: '24px 18px 18px',
+      padding: isMobile ? '20px 14px 14px' : '24px 18px 18px',
       transition: 'transform 0.22s ease',
       boxShadow: '4px 0 24px rgba(0,0,0,0.4)',
     },

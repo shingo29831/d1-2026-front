@@ -4,6 +4,8 @@ import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { rectFootprint, lShapeFootprint, footprintBounds } from '../../roomShapes';
 import { exportLivingRoomAsGlb } from '../../exportRoomGlb';
+import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -47,6 +49,7 @@ export default function RoomSetupPage() {
     addWall, updateWall, removeWall, resetWalls,
   } = useRoomConfig();
   const { theme } = useTheme();
+  const { isMobile } = useViewport();
 
   const [shapeType, setShapeType] = useState(roomShapeType);
   const [params, setParams] = useState(roomShapeParams);
@@ -263,16 +266,22 @@ export default function RoomSetupPage() {
     updateWall(id, { [key]: Number.isNaN(num) ? 0 : num });
   };
 
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>部屋の設定</h2>
-      <p style={s.lead}>
-        見守りダッシュボードに表示する部屋の形を設定します。長方形・L字型・自由な多角形から選べるほか、
-        ②お手持ちのPolycamなどでスキャンしたGLTF/GLBファイルを読み込むこともできます。
-        変更はこの端末のブラウザに保存され、見守りダッシュボードにすぐ反映されます。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        部屋の設定
+        <InfoButton title="部屋の設定について">
+          見守りダッシュボードに表示する部屋の形を設定します。長方形・L字型・自由な多角形から選べるほか、
+          ②お手持ちのPolycamなどでスキャンしたGLTF/GLBファイルを読み込むこともできます。
+          変更はこの端末のブラウザに保存され、見守りダッシュボードにすぐ反映されます。
+        </InfoButton>
+      </h2>
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」という要望に合わせて、
           3列を明確に役割分担させている。左列=②で選んだ形をそのまま確認・編集できる
@@ -315,7 +324,11 @@ export default function RoomSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        {/* 【2026-08-19変更】「各設定項目の3Dプレビューは一番下に表示してほしい」
+            というご要望を受け、スマホ幅(縦積み)のときだけこの列を一番下に回す。
+            デスクトップでは元通り中央列のまま(CSS Gridのorderプロパティで見た目の
+            順序だけ変える。DOM自体の順序=保存/入力の処理順は変えていない)。 */}
+        <div style={{ ...s.col, order: isMobile ? 3 : 2 }}>
           <section style={s.card}>
             <h3 style={s.h3}>3Dプレビュー</h3>
             <p style={s.desc}>①の内容を変更すると、保存前でもここに反映されます。</p>
@@ -332,7 +345,7 @@ export default function RoomSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        <div style={{ ...s.col, order: isMobile ? 2 : 3 }}>
           <section style={s.card}>
             <h3 style={s.h3}>① 部屋の形を作成する</h3>
 
@@ -564,20 +577,20 @@ export default function RoomSetupPage() {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 8px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
     // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
     // 左列・中央列はカード1枚ずつ、右列は①②③④の詳細設定カードを縦に積む
-    // (colスタイルでflex-direction:columnにして積む)。
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
-    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
-    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
+    // (colスタイルでflex-direction:columnにして積む)。スマホ幅では1列に潰す。
+    grid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? 14 : 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: isMobile ? 14 : 20, minWidth: 0 },
+    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: isMobile ? 14 : 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     hint: { fontSize: 12.5, color: theme.textMuted, lineHeight: 1.6, margin: '6px 0 10px' },
     traceBox: { marginTop: 14, padding: 12, borderRadius: 10, background: theme.panelBgAlt, border: `1px dashed ${theme.borderSoft}` },

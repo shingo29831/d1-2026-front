@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import HamburgerMenu from './HamburgerMenu';
 import { useTheme } from '../../themeContext';
+import { useViewport } from '../../hooks/useViewport';
 
 // 画面上部に固定表示する共通ヘッダー。
 // これまでは「ハンバーガーメニューの開閉ボタン」と「常設のログアウトボタン」が
@@ -18,9 +19,10 @@ export const HEADER_HEIGHT = 60;
 
 export default function AppHeader({ currentPage, onNavigate, connected, userEmail, authMode, onLogout }) {
   const { theme } = useTheme();
+  const { isMobile } = useViewport();
   const [accountOpen, setAccountOpen] = useState(false);
   const accountRef = useRef(null);
-  const s = makeStyles(theme);
+  const s = makeStyles(theme, isMobile);
 
   // アカウントカードの外側をクリックしたら閉じる(タップで開いたときのため)。
   useEffect(() => {
@@ -89,7 +91,7 @@ export default function AppHeader({ currentPage, onNavigate, connected, userEmai
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   return {
     header: {
       position: 'fixed',
@@ -101,19 +103,22 @@ function makeStyles(theme) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 18px',
+      padding: isMobile ? '0 10px' : '0 18px',
       background: theme.mode === 'dark' ? 'rgba(15,18,26,0.92)' : 'rgba(255,255,255,0.92)',
       backdropFilter: 'blur(8px)',
       borderBottom: `1px solid ${theme.border}`,
     },
-    left: { display: 'flex', alignItems: 'center', gap: 14, minWidth: 0 },
-    brand: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 },
-    brandTitle: { fontSize: 15, fontWeight: 700, color: theme.textStrong, whiteSpace: 'nowrap' },
+    left: { display: 'flex', alignItems: 'center', gap: isMobile ? 8 : 14, minWidth: 0, flex: 1 },
+    // 【2026-08-19追加: スマホ対応】タイトルが長い/画面が狭いとアカウント
+    // アイコンと衝突しうるため、はみ出す分は省略記号(…)で切る。
+    brand: { display: 'flex', alignItems: 'center', gap: 8, minWidth: 0, flex: 1 },
+    brandTitle: { fontSize: 15, fontWeight: 700, color: theme.textStrong, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: 0 },
     connDot: { width: 8, height: 8, borderRadius: '50%', flexShrink: 0 },
-    account: { position: 'relative' },
+    account: { position: 'relative', flexShrink: 0 },
     avatarBtn: {
-      width: 38,
-      height: 38,
+      // スマホではタップ領域として38pxはやや小さいため、44px相当まで広げる。
+      width: isMobile ? 44 : 38,
+      height: isMobile ? 44 : 38,
       borderRadius: '50%',
       border: `1px solid ${theme.accentBorder}`,
       background: theme.accentSoft,
@@ -124,6 +129,7 @@ function makeStyles(theme) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
+      flexShrink: 0,
     },
     dropdown: {
       // アイコンとカードの間に隙間を空けない(隙間があると、カーソルを
@@ -133,7 +139,8 @@ function makeStyles(theme) {
       top: '100%',
       right: 0,
       marginTop: 0,
-      minWidth: 260,
+      minWidth: isMobile ? 'min(260px, calc(100vw - 24px))' : 260,
+      maxWidth: 'calc(100vw - 16px)',
       background: theme.panelBg,
       border: `1px solid ${theme.border}`,
       borderRadius: 12,

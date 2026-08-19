@@ -31,12 +31,14 @@ function loadSaved() {
 }
 
 export function OperationModeProvider({ children }) {
-  // 既定はデモ用データ(これまで通りの挙動)。一度でも切り替えれば、その選択が
-  // localStorageに保存され、次回起動時もその選択が復元される。
-  // 本番ビルド時は強制的に本番環境モード(production)に固定する。
+  // 【2026-08-19変更】既定は本番環境(production)。以前はデモ用データが既定だったが、
+  // 「一番最初はデフォルトで本番環境で入るように」というご要望を受けて変更した。
+  // 一度でも切り替えれば、その選択がlocalStorageに保存され、次回起動時もその選択が
+  // 復元される(初回のみこの既定値が使われる)。本番ビルド時は従来通り強制的に
+  // 本番環境モード(production)に固定する。
   const [mode, setMode] = useState(() => {
     if (!import.meta.env.DEV) return 'production';
-    return loadSaved() || 'demo';
+    return loadSaved() || 'production';
   });
 
   useEffect(() => {

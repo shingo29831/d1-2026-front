@@ -3,6 +3,8 @@ import RoomScene from '../room-scene/RoomScene';
 import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds, nearestEdgePoint, normalToYawDeg, yawDegToDir } from '../../roomShapes';
+import { useViewport } from '../../hooks/useViewport';
+import InfoButton from '../common/InfoButton';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -41,6 +43,7 @@ export default function CameraSetupPage() {
     setCameraPlacement, setCameraPitch, setCameraFov, setCameraRange, defaults,
   } = useRoomConfig();
   const { theme } = useTheme();
+  const { isMobile } = useViewport();
 
   const [draftMount, setDraftMount] = useState(cameraMount);
   const [draftYaw, setDraftYaw] = useState(cameraYawDeg);
@@ -209,17 +212,23 @@ export default function CameraSetupPage() {
   const wedgePathStr = wedgeSvgPoints.map((p) => `${p.sx},${p.sy}`).join(' ');
   const arrowEnd = roomToSvg(draftMount.x + dir.x * (visRange * 0.55), draftMount.z + dir.z * (visRange * 0.55));
 
-  const s = useMemo(() => makeStyles(theme), [theme]);
+  const s = useMemo(() => makeStyles(theme, isMobile), [theme, isMobile]);
 
   return (
     <div style={s.page}>
-      <h2 style={s.h2}>カメラ位置の設定</h2>
-      <p style={s.lead}>
-        見守りカメラを実際にどこへ設置するか決めるページです。「壁に固定」では間取り図内をクリックすると
-        一番近い壁にカメラが自動的に吸着して配置されます(実機は壁掛けカメラのため)。「自由配置」では
-        部屋の中の好きな位置にカメラを置き、向き(角度)を自由に回転させられます。視野角(FOV)と
-        見える範囲(距離)は水色の扇形で表示され、どちらもスライダーで調整できます。
-      </p>
+      {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
+          「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
+          表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)
+          経由の表示に変更した。 */}
+      <h2 style={s.h2}>
+        カメラ位置の設定
+        <InfoButton title="カメラ位置の設定について">
+          見守りカメラを実際にどこへ設置するか決めるページです。「壁に固定」では間取り図内をクリックすると
+          一番近い壁にカメラが自動的に吸着して配置されます(実機は壁掛けカメラのため)。「自由配置」では
+          部屋の中の好きな位置にカメラを置き、向き(角度)を自由に回転させられます。視野角(FOV)と
+          見える範囲(距離)は水色の扇形で表示され、どちらもスライダーで調整できます。
+        </InfoButton>
+      </h2>
 
       {/* 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
           左列=間取り図(2D。カメラのドラッグ移動もここで行う)、中央列=3Dプレビュー
@@ -277,7 +286,11 @@ export default function CameraSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        {/* 【2026-08-19変更】「各設定項目の3Dプレビューは一番下に表示してほしい」
+            というご要望を受け、スマホ幅(縦積み)のときだけこの列を一番下に回す。
+            デスクトップでは元通り中央列のまま(CSS Gridのorderプロパティで見た目の
+            順序だけ変える)。 */}
+        <div style={{ ...s.col, order: isMobile ? 3 : 2 }}>
           <section style={s.card}>
             <div style={s.previewHeader}>
               <h3 style={{ ...s.h3, margin: 0 }}>プレビュー</h3>
@@ -312,7 +325,7 @@ export default function CameraSetupPage() {
           </section>
         </div>
 
-        <div style={s.col}>
+        <div style={{ ...s.col, order: isMobile ? 2 : 3 }}>
           <section style={s.card}>
             <h3 style={s.h3}>設置方法</h3>
             <div style={s.shapeTabs}>
@@ -382,18 +395,20 @@ export default function CameraSetupPage() {
   );
 }
 
-function makeStyles(theme) {
+function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 8px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },
     // 「左に2D現状の配置、中央に3Dプレビュー、右に詳細設定」の3列レイアウト。
-    grid: { display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 20, alignItems: 'start' },
-    col: { display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 },
-    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: 20, minWidth: 0 },
+    // スマホ幅では3列を維持すると間取り図・3Dプレビューが極端に小さくなって
+    // 操作できなくなるため、1列(縦積み)に切り替える。
+    grid: { display: 'grid', gridTemplateColumns: isMobile ? '1fr' : 'repeat(3, 1fr)', gap: isMobile ? 14 : 20, alignItems: 'start' },
+    col: { display: 'flex', flexDirection: 'column', gap: isMobile ? 14 : 20, minWidth: 0 },
+    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: isMobile ? 14 : 20, minWidth: 0 },
     desc: { fontSize: 13, color: theme.textMuted, lineHeight: 1.6, marginBottom: 14 },
     hint: { fontSize: 12.5, color: theme.textFaint, lineHeight: 1.6, margin: '4px 0 8px' },
     shapeTabs: { display: 'flex', gap: 8, marginBottom: 8 },
@@ -412,6 +427,6 @@ function makeStyles(theme) {
     toggleGroup: { display: 'flex', gap: 6 },
     toggleBtn: { fontSize: 12.5, padding: '6px 12px', borderRadius: 6, border: `1px solid ${theme.borderSoft}`, background: 'transparent', color: theme.textMuted, cursor: 'pointer' },
     toggleBtnActive: { background: theme.accentSoft, color: theme.accent, borderColor: theme.accentBorder },
-    previewWrap: { width: '100%', height: 460, background: theme.panelBgAlt, borderRadius: 10, overflow: 'hidden', marginTop: 14 },
+    previewWrap: { width: '100%', height: isMobile ? 320 : 460, background: theme.panelBgAlt, borderRadius: 10, overflow: 'hidden', marginTop: 14 },
   };
 }

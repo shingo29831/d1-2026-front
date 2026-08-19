@@ -16,7 +16,7 @@ import { useRoomConfig } from '../../roomConfigContext';
 import { useTheme } from '../../themeContext';
 import { footprintBounds } from '../../roomShapes';
 
-function CameraRig({ viewMode, overviewCamera, povCamera }) {
+function CameraRig({ viewMode, overviewCamera, povCamera, onUserOrbit }) {
   const { camera } = useThree();
   const controls = useRef();
   const target = viewMode === 'overview' ? overviewCamera : povCamera;
@@ -38,7 +38,24 @@ function CameraRig({ viewMode, overviewCamera, povCamera }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewMode, target.position[0], target.position[1], target.position[2], target.fov, target.lookAt && target.lookAt[0], target.lookAt && target.lookAt[1], target.lookAt && target.lookAt[2]]);
 
-  return <OrbitControls ref={controls} enableDamping dampingFactor={0.1} minDistance={0.8} maxDistance={24} />;
+  return (
+    <OrbitControls
+      ref={controls}
+      enableDamping
+      dampingFactor={0.1}
+      minDistance={0.8}
+      maxDistance={24}
+      // 【2026-08-19追加】「カメラ視点」ボタンを押した後にユーザーが実際に
+      // 3Dプレビューをドラッグして視点を動かし始めたら、もうカメラの設置位置
+      // そのものの視点ではなくなるため、StatusBar側の「カメラ視点」ボタンの
+      // ハイライトを外す。onStartはユーザー操作(ドラッグ/ホイール/タッチ)で
+      // 動かし始めた瞬間だけ発火し、上のuseEffectによるcamera.position.set()
+      // のようなプログラムからの変更では発火しないため、ここで使う。
+      onStart={() => {
+        if (viewMode === 'pov' && onUserOrbit) onUserOrbit();
+      }}
+    />
+  );
 }
 
 // people: [{ id, floor: {x,z}, fallen, colorState }, ...] 検出された全員分
@@ -61,6 +78,7 @@ export default function RoomScene({
   showHeatmap,
   heatmapIncidents,
   riskSuggestions,
+  onUserOrbit,
 }) {
   const {
     footprint: ctxFootprint,
@@ -252,7 +270,7 @@ export default function RoomScene({
           床のサイズ感は床面(PlaceholderRoom.jsxのmeshStandardMaterial)自体の
           陰影・部屋の外形線だけで十分伝わるため、削除しても部屋の見え方に支障はない。 */}
 
-      <CameraRig viewMode={viewMode} overviewCamera={overviewCamera} povCamera={povCamera} />
+      <CameraRig viewMode={viewMode} overviewCamera={overviewCamera} povCamera={povCamera} onUserOrbit={onUserOrbit} />
     </Canvas>
     </Canvas3DErrorBoundary>
   );

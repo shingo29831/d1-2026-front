@@ -5,11 +5,7 @@ import AppHeader, { HEADER_HEIGHT } from './components/layout/AppHeader';
 import MonitoringDashboard from './components/dashboard/MonitoringDashboard';
 import YoloCheckPage from './components/diagnostics/YoloCheckPage';
 import PolycamCheckPage from './components/diagnostics/PolycamCheckPage';
-import RoomSetupPage from './components/room-setup/RoomSetupPage';
-import CameraSetupPage from './components/camera-setup/CameraSetupPage';
-import FurnitureSetupPage from './components/furniture-zone-setup/FurnitureSetupPage';
-import ZoneSetupPage from './components/furniture-zone-setup/ZoneSetupPage';
-import DoorSensorSetupPage from './components/door-sensor-setup/DoorSensorSetupPage';
+import SettingsPage from './components/settings/SettingsPage';
 import HistoryPage from './components/history/HistoryPage';
 import IncidentDataEditorPage from './components/history/IncidentDataEditorPage';
 import ConnectionStatusPage from './components/connection-status/ConnectionStatusPage';
@@ -59,14 +55,16 @@ const LEGACY_AUTH_KEYS = ['system1.auth.v1', 'system1.auth.email.v1', 'system1.a
 // ・ダーク/ホワイトモード(ThemeProvider)もアプリ全体で共有する。
 // ・左上のハンバーガーメニューで各ページを切り替える:
 //     1. 見守りダッシュボード  … 3Dルーム + 危険通知(本命の画面。仕様書Step 3/4)
-//     2. 部屋の設定            … 部屋の形(長方形/L字/自由多角形)入力 or GLTF/GLBの読み込み(仕様書Step 2)
-//     3. カメラ位置の設定      … 間取り図でカメラの設置位置・向き・視野角を決める(仕様書Step 4の仮想カメラ配置)
-//     4. 家具の設定            … 家具(箱)を間取り図上で自由に配置(以前は「家具・エリアの設定」として1画面だったが分割)
-//     5. エリアの設定          … 危険/注意エリアを間取り図上で自由に配置(同上)
-//     6. 開閉センサーの設定    … 玄関・勝手口などの開閉センサー(仕様書のsensor_type:"door")を間取り図上に配置
-//     7. 危険行為の履歴        … 転倒・危険エリアへの接近の履歴一覧とヒートマップ(仕様書Step 5)
-//     8. YOLOの起動・動作確認  … Webカメラ/動画・2Dオーバーレイ・生データ確認
-//     9. Polycamの動作確認     … スキャンしたGLTF/GLBの読み込み確認、間取り図画像の確認
+//     2. 各種設定              … 部屋・カメラ位置・家具・エリア・開閉センサーの5設定を
+//                                タブ切り替えでまとめた1画面(components/settings/SettingsPage.jsx。
+//                                「スマホ対応の大改良」で、画面遷移を減らすため2026-08-19に
+//                                5画面から1画面(タブ切り替え)へ統合した。以前は
+//                                「部屋の設定」「カメラ位置の設定」「家具の設定」
+//                                「エリアの設定」「開閉センサーの設定」がそれぞれ独立した
+//                                ページ遷移だった)
+//     3. 危険行為の履歴        … 転倒・危険エリアへの接近の履歴一覧とヒートマップ(仕様書Step 5)
+//     4. YOLOの起動・動作確認  … Webカメラ/動画・2Dオーバーレイ・生データ確認
+//     5. Polycamの動作確認     … スキャンしたGLTF/GLBの読み込み確認、間取り図画像の確認
 //
 // 【重要】ログイン画面(LoginPage)は家庭内利用向けのプロトタイプのため、実際の
 // 認証は行っていない(Cognito未接続時)。メールアドレス・パスワードを入力する
@@ -352,15 +350,7 @@ function AppShell({ userEmail, authMode, onLogout }) {
             </div>
           )}
 
-          {page === 'roomSetup' && <RoomSetupPage />}
-
-          {page === 'cameraSetup' && <CameraSetupPage />}
-
-          {page === 'furnitureSetup' && <FurnitureSetupPage />}
-
-          {page === 'zoneSetup' && <ZoneSetupPage />}
-
-          {page === 'doorSensorSetup' && <DoorSensorSetupPage />}
+          {page === 'settings' && <SettingsPage />}
 
           {page === 'history' && <HistoryPage />}
 

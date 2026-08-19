@@ -355,24 +355,24 @@ export default function YoloCheckPage({
           <p style={{ fontWeight: 'bold' }}>入力映像 (Webcam / Video)</p>
           {/* 実際の<video>要素はApp.jsx側からcreatePortalで差し込まれる
               (このページ滞在中だけ表示位置がここになる)。 */}
-          <div ref={videoSlotRef} style={{ width: '480px', height: '360px', background: '#000', borderRadius: '8px' }} />
+          <div ref={videoSlotRef} style={{ width: 'min(480px, 100%)', aspectRatio: '4 / 3', background: '#000', borderRadius: '8px' }} />
         </div>
 
         <div>
           <p style={{ fontWeight: 'bold' }}>2D 骨格オーバーレイ</p>
-          <div style={{ position: 'relative', width: '480px', height: '360px', margin: '0 auto' }}>
+          <div style={{ position: 'relative', width: 'min(480px, 100%)', aspectRatio: '4 / 3', margin: '0 auto' }}>
             <canvas
               ref={canvas2dRef}
               width="640"
               height="480"
-              style={{ width: '480px', height: '360px', background: '#000', borderRadius: '8px', position: 'absolute', top: 0, left: 0 }}
+              style={{ width: '100%', height: '100%', background: '#000', borderRadius: '8px', position: 'absolute', top: 0, left: 0 }}
             />
           </div>
         </div>
 
         <div>
           <p style={{ fontWeight: 'bold' }}>3D ヒューマノイドアバター（複数人対応）</p>
-          <div ref={canvas3dRef} style={{ width: '480px', height: '480px', background: '#000', borderRadius: '8px', overflow: 'hidden', margin: '0 auto' }} />
+          <div ref={canvas3dRef} style={{ width: 'min(480px, 100%)', aspectRatio: '1 / 1', background: '#000', borderRadius: '8px', overflow: 'hidden', margin: '0 auto' }} />
         </div>
       </div>
 
