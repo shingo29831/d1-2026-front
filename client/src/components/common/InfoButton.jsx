@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useTheme } from '../../themeContext';
+import { FONT_FAMILY } from '../../fontFamily';
 
 // 【2026-08-19追加】「危険行為の履歴やほかの設定などの長い説明文を、タイトルの
 // 横にiボタンを追加して、押したら説明をモーダルで画面中央に表示するように
@@ -43,6 +44,11 @@ function makeStyles(theme) {
   return {
     // タイトル文字と並べても違和感が無いよう、小さな丸ボタンにしている
     // (この手のUIでよく使われる「i」アイコンボタンの見た目)。
+    // 【2026-08-19further変更・不具合修正】「文字が統一されていない」という
+    // ご指摘への対応。以前はこの「i」だけ明朝体(Georgia/Times New Roman)の
+    // 斜体にしていたが、アプリ全体のフォント(fontFamily.js参照)から浮いて
+    // 見えていたため、書体はアプリ共通のものに合わせつつ、太字・斜体だけは
+    // 残して「i」アイコンらしい見分けやすさは保つようにした。
     btn: {
       display: 'inline-flex',
       alignItems: 'center',
@@ -56,7 +62,7 @@ function makeStyles(theme) {
       fontSize: 12,
       fontWeight: 700,
       fontStyle: 'italic',
-      fontFamily: 'Georgia, "Times New Roman", serif',
+      fontFamily: FONT_FAMILY,
       cursor: 'pointer',
       marginLeft: 8,
       verticalAlign: 'middle',

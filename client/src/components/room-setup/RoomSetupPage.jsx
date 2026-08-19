@@ -6,6 +6,7 @@ import { rectFootprint, lShapeFootprint, footprintBounds } from '../../roomShape
 import { exportLivingRoomAsGlb } from '../../exportRoomGlb';
 import { useViewport } from '../../hooks/useViewport';
 import InfoButton from '../common/InfoButton';
+import { FONT_FAMILY } from '../../fontFamily';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -714,7 +715,7 @@ function makeStyles(theme, isMobile) {
   const svgBg = theme.mode === 'dark' ? '#0a0e16' : '#eef2f8';
   return {
     svgBg,
-    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' },
+    page: { padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: FONT_FAMILY },
     h2: { marginTop: 0, marginBottom: 6, color: theme.textStrong, fontSize: 22 },
     h3: { margin: '0 0 8px', fontSize: 15.5, color: theme.textStrong },
     lead: { color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5, marginBottom: 24 },

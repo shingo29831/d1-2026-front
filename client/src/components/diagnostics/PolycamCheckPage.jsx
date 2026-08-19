@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import GltfErrorBoundary from '../room-scene/GltfErrorBoundary';
 import { ROOM_MODEL_PATH } from '../../config';
 import { useTheme } from '../../themeContext';
+import { FONT_FAMILY } from '../../fontFamily';
 
 function LoadedModel({ url, onStats }) {
   const { scene } = useGLTF(url);
@@ -98,7 +99,7 @@ export default function PolycamCheckPage() {
   };
 
   return (
-    <div style={{ padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: FONT_FAMILY }}>
       <h2 style={{ marginTop: 0, color: theme.textStrong, fontSize: 22 }}>Polycamの動作確認</h2>
       <p style={{ color: theme.textMuted, maxWidth: 1100, lineHeight: 1.7, fontSize: 14.5 }}>
         Polycamでスキャンした自室のGLTF/GLBを読み込めるか確認するページです。

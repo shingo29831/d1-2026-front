@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls';
 import { SKELETON_CONNECTIONS, MAX_PERSONS, CONF_THRESHOLD } from '../../config';
 import { useTheme } from '../../themeContext';
+import { FONT_FAMILY } from '../../fontFamily';
 
 // 「YOLOの起動・動作確認」ページ。
 // 以前のApp.jsxの中身(Webカメラ/動画入力・2D骨格オーバーレイ・3Dミニプレビュー)を
@@ -290,7 +291,7 @@ export default function YoloCheckPage({
   const lastSeenSec = lastPoseAt ? ((Date.now() - lastPoseAt) / 1000).toFixed(1) : '-';
 
   return (
-    <div style={{ padding: '24px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: '24px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: FONT_FAMILY }}>
       <h2 style={{ marginTop: 0, color: theme.textStrong }}>YOLOv8 + Node.js + Three.js 動作確認</h2>
 
       {shouldCapture === false && (

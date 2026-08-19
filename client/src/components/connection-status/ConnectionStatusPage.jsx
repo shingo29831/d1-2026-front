@@ -9,6 +9,7 @@ import { getSignedIotWebSocketUrl } from '../../iotClient';
 import { withTimeout } from '../../withTimeout';
 import { useViewport } from '../../hooks/useViewport';
 import InfoButton from '../common/InfoButton';
+import { FONT_FAMILY } from '../../fontFamily';
 
 // ===================================================================
 // 「接続状況」診断ページ。
@@ -217,7 +218,7 @@ export default function ConnectionStatusPage({
   }, [IOT_ENDPOINT]);
 
   return (
-    <div style={{ padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: 'sans-serif' }}>
+    <div style={{ padding: isMobile ? '16px 14px 32px' : '24px 32px 48px', background: theme.pageBg, color: theme.text, minHeight: '100vh', fontFamily: FONT_FAMILY }}>
       {/* 【2026-08-19変更】以前はここに長い説明文を常時表示していたが、
           「タイトルの横にiボタンを追加して、押したら説明をモーダルで画面中央に
           表示するようにしてほしい」というご要望を受け、InfoButton(共通部品)

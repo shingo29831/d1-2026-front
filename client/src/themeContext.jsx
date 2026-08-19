@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useMemo, useState, useCallback } from 'react';
+import { FONT_FAMILY } from './fontFamily';
 
 // ===================================================================
 // ダークモード/ホワイトモードの切り替えを、アプリ全体(通常のHTML画面と
@@ -90,9 +91,34 @@ export function ThemeProvider({ children }) {
     }
     if (typeof document !== 'undefined') {
       document.body.style.background = PALETTES[mode].pageBg;
+      // 【文字統一の不具合修正】以前はここでbodyの背景色しか設定しておらず、
+      // アプリ全体のフォントはどこにも指定されていなかった。ヘッダー・
+      // ハンバーガーメニュー・見守りダッシュボードの外枠など、各ページが
+      // 個別に指定しているfontFamily:'sans-serif'を持たない部分は、
+      // ブラウザの既定フォント(明朝体/セリフ体になることが多い)がそのまま
+      // 表示され、ページ本文と書体がちぐはぐになっていた。ここでbody全体に
+      // 共通のフォント(fontFamily.js参照)を指定し、個別に指定していない
+      // 部分もすべてこれを継承するようにする。
+      document.body.style.fontFamily = FONT_FAMILY;
       document.body.style.transition = 'background 0.15s ease';
     }
   }, [mode]);
+
+  // 【文字統一の不具合修正・続き】input・button・select・textareaは、多くの
+  // ブラウザの既定スタイルで親要素のfontFamilyを引き継がない(フォーム部品
+  // 専用の既定書体が使われる)ため、上記のbody指定だけでは入力欄・ボタンの
+  // 文字だけ書体が揃わないまま残ってしまう。アプリ全体で一度だけ、フォーム
+  // 部品にも親のフォントを継承させる最小限のCSSを追加しておく(初回マウント
+  // 時の1回のみ。React 18のStrict Modeによる二重実行でも重複挿入しないよう
+  // IDで存在チェックしている)。
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('system1-font-inherit-style')) return;
+    const style = document.createElement('style');
+    style.id = 'system1-font-inherit-style';
+    style.textContent = 'input, button, select, textarea { font-family: inherit; }';
+    document.head.appendChild(style);
+  }, []);
 
   const toggleTheme = useCallback(() => {
     setMode((m) => (m === 'dark' ? 'light' : 'dark'));

@@ -3,6 +3,7 @@ import { signIn } from 'aws-amplify/auth';
 import { useTheme } from '../../themeContext';
 import { isCognitoConfigured } from '../../amplifyConfig';
 import { describeCognitoError } from '../../cognitoErrors';
+import { FONT_FAMILY } from '../../fontFamily';
 
 // ログイン画面。アイコン・装飾は一切使わず、ラベル・入力欄・ボタンだけの
 // とてもシンプルな構成にしている。
@@ -33,6 +34,11 @@ export default function LoginPage({ onLogin }) {
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
+  // 【2026-08-19further変更】「パスワードを打った時に見えないので見えるように
+  // してほしい」というご要望への対応。既定は今まで通りマスク表示(●●●)にして
+  // おき、右側の「表示」ボタンを押した間だけ平文表示に切り替えられるようにする
+  // (押しっぱなしにする必要はなく、トグル式でON/OFFする)。
+  const [showPassword, setShowPassword] = useState(false);
 
   const s = useMemo(() => makeStyles(theme), [theme]);
 
@@ -74,7 +80,34 @@ export default function LoginPage({ onLogin }) {
   };
 
   return (
-    <div style={s.backdrop}>
+    <div className="s1-login-backdrop" style={s.backdrop}>
+      {/* 【2026-08-19further変更・不具合修正】「スマホ画面になったときに画面に
+          収まらない」というご報告への対応。以前はheight:'100vh'固定にしていたが、
+          スマホでパスワード欄をタップして画面キーボードが開くと、多くの
+          ブラウザでは`100vh`が「キーボードで隠れる前の全体の高さ」のまま
+          変わらない(実際に見えている範囲より大きい)ため、overflow:'hidden'と
+          組み合わさってフォームの下側がキーボードの裏に隠れたまま、
+          スクロールもできずに「見えない・収まらない」状態になっていた。
+          対応として、React styleオブジェクトでは1つのプロパティに複数の
+          フォールバック値を書けない(後勝ちで上書きされてしまう)ため、
+          ここだけ通常のCSS(<style>タグ)で定義し、
+            height: 100vh;             ← dvh未対応の古いブラウザ向け
+            height: 100dvh;            ← 対応ブラウザではキーボード分を
+                                          差し引いた実際の表示高さに追従する
+            overflow: hidden;          ← 横方向は常に固定(スクロールさせない)
+            overflow-y: auto;          ← 縦方向だけは、万一それでも収まりきら
+                                          ない場合の保険としてスクロール可能に
+                                          しておく(普段は中身が収まるため
+                                          実際にスクロールバーは出ない)
+          という優先順位で指定している。 */}
+      <style>{`
+        .s1-login-backdrop {
+          height: 100vh;
+          height: 100dvh;
+          overflow: hidden;
+          overflow-y: auto;
+        }
+      `}</style>
       <div style={s.card}>
         <h1 style={s.title}>ログイン</h1>
         <p style={s.subtitle}>子供見守りシステム</p>
@@ -96,14 +129,29 @@ export default function LoginPage({ onLogin }) {
 
           <label style={s.label}>
             パスワード
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder=""
-              style={s.input}
-              autoComplete="current-password"
-            />
+            {/* 【不具合修正】パスワード入力欄の右側に「表示」ボタンを追加し、
+                押すとinputのtypeを'password'⇔'text'に切り替えて、今何を
+                入力しているか目で確認できるようにする。ボタン分の余白を
+                確保するため、入力欄のpadding-rightだけ広めに取っている。 */}
+            <div style={s.passwordWrap}>
+              <input
+                type={showPassword ? 'text' : 'password'}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder=""
+                style={s.passwordInput}
+                autoComplete="current-password"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((v) => !v)}
+                style={s.passwordToggleBtn}
+                aria-label={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+                title={showPassword ? 'パスワードを隠す' : 'パスワードを表示'}
+              >
+                {showPassword ? '隠す' : '表示'}
+              </button>
+            </div>
           </label>
 
           <button type="submit" style={s.submitBtn} disabled={submitting}>
@@ -136,20 +184,20 @@ function makeStyles(theme) {
     // 画面の中央に表示してほしい」というご要望への対応。以前はminHeight:
     // '100vh'だったため、画面が低い機種では100vhを超えてページ全体が
     // 縦スクロールしてしまい、フォームが常に中央に見えるとは限らなかった。
-    // height:'100vh'(+box-sizing:border-box)に変え、これ自体はスクロール
-    // させない(overflow:'hidden')。万一きわめて縦が短い画面でフォームが
-    // 収まりきらない場合の保険として、カード側にmaxHeight+overflowY:'auto'
-    // を付けている(その場合もページ全体ではなくカードの中だけがスクロール
-    // する)。
+    // 【2026-08-19further2変更】height・overflowの実際の値は、キーボード
+    // 表示時にも追従できるよう上の<style>タグ(className="s1-login-backdrop")
+    // 側で指定するようにしたため、ここでは指定しない(inline styleの方が
+    // 優先度が高く、指定してしまうと<style>タグの内容を上書きしてしまう
+    // ため)。万一きわめて縦が短い画面でフォームが収まりきらない場合の保険
+    // として、カード側にmaxHeight+overflowY:'auto'を付けている(その場合も
+    // ページ全体ではなくカードの中だけがスクロールする)。
     backdrop: {
-      height: '100vh',
-      overflow: 'hidden',
       boxSizing: 'border-box',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       background: theme.pageBg,
-      fontFamily: 'sans-serif',
+      fontFamily: FONT_FAMILY,
       padding: 24,
     },
     card: {
@@ -176,6 +224,34 @@ function makeStyles(theme) {
       padding: '10px 11px',
       fontSize: 14,
       boxSizing: 'border-box',
+    },
+    // 【不具合修正】パスワード入力欄の右側に「表示」ボタンを重ねて置くための
+    // ラッパー(position:relative)。ボタン自体はabsoluteでこの中の右端に
+    // 配置する。
+    passwordWrap: { position: 'relative', width: '100%' },
+    passwordInput: {
+      width: '100%',
+      background: theme.inputBg,
+      border: `1px solid ${theme.borderSoft}`,
+      borderRadius: 6,
+      color: theme.text,
+      padding: '10px 52px 10px 11px', // 右側だけ「表示」ボタン分の余白を広めに確保
+      fontSize: 14,
+      boxSizing: 'border-box',
+    },
+    passwordToggleBtn: {
+      position: 'absolute',
+      top: '50%',
+      right: 6,
+      transform: 'translateY(-50%)',
+      border: 'none',
+      background: 'transparent',
+      color: theme.accent,
+      fontSize: 11.5,
+      fontWeight: 700,
+      cursor: 'pointer',
+      padding: '4px 6px',
+      borderRadius: 4,
     },
     submitBtn: {
       marginTop: 4,
