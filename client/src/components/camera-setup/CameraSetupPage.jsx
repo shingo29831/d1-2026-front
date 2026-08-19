@@ -9,7 +9,7 @@ import InfoButton from '../common/InfoButton';
 const SVG_W = 560;
 const SVG_H = 420;
 const PAD = 36;
-const HEIGHT_LIMITS = { min: 0.5, max: 2.6, step: 0.1 };
+const HEIGHT_LIMITS = { min: 0.0, max: 2.6, step: 0.1 };
 const FOV_LIMITS = { min: 30, max: 120, step: 1 };
 // カメラの見える範囲(検知・表示距離)。あまり短いと部屋の中央にすら届かず、
 // 長すぎても間取り図からはみ出すだけになるため、この範囲に制限している。
