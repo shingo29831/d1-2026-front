@@ -754,7 +754,17 @@ function makeStyles(theme, isMobile) {
     grid: { display: 'flex', gap: isMobile ? 16 : 24, flexWrap: 'wrap', alignItems: 'flex-start' },
     // スマホ幅では固定580pxだと画面からはみ出すため、画面幅いっぱいに広げる
     // (2枚のカードは横並びをやめ、gridのflexWrapによって自然に縦積みになる)。
-    card: { background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14, padding: isMobile ? 14 : 20, width: isMobile ? '100%' : 580 },
+    // 【2026-08-19further変更・不具合修正】「カードがスマホ画面に収まっていない」
+    // という報告への対応。width:'100%'に加えてpadding・borderも指定していたが、
+    // boxSizing(既定はcontent-box)を指定していなかったため、実際の描画幅が
+    // 「100%(画面幅いっぱい) + padding(左右28px) + border(左右2px)」分だけ
+    // 画面より広がってしまい、横スクロールが発生していた。他ページ(LoginPage.jsx
+    // 等)と同じくboxSizing:'border-box'を指定し、width指定にpadding・borderを
+    // 含めて計算させることで画面幅にきちんと収まるようにする。
+    card: {
+      background: theme.panelBg, border: `1px solid ${theme.border}`, borderRadius: 14,
+      padding: isMobile ? 14 : 20, width: isMobile ? '100%' : 580, boxSizing: 'border-box',
+    },
     listCard: { display: 'flex', flexDirection: 'column' },
     cardHeaderRow: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4, flexWrap: 'wrap', gap: 8 },
     desc: { fontSize: 12, color: theme.textMuted, lineHeight: 1.6, marginBottom: 10 },
@@ -865,7 +875,7 @@ function makeStyles(theme, isMobile) {
     mapModeBtnActive: { background: theme.accentSoft, color: theme.accent, border: `1px solid ${theme.accentBorder}` },
     chart3dWrap: {
       width: '100%', height: SVG_H, borderRadius: 10, overflow: 'hidden',
-      border: `1px solid ${theme.borderSoft}`,
+      border: `1px solid ${theme.borderSoft}`, boxSizing: 'border-box',
     },
     filterTabs: { display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' },
     filterTab: {
