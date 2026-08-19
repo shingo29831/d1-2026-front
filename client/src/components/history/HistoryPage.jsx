@@ -7,7 +7,6 @@ import { footprintBounds, footprintCenter, footprintEdges, pointInPolygon } from
 import { isInsideZone } from '../../poseGeometry';
 import { getIncidentsSortedDesc, CATEGORIES, GROUPS } from '../../incidentHistory';
 import { fetchIncidentsSortedDesc } from '../../historyApi';
-import IncidentBarChart3D from './IncidentBarChart3D';
 import IncidentHeatmap3D from './IncidentHeatmap3D';
 import InfoButton from '../common/InfoButton';
 
@@ -98,14 +97,13 @@ export default function HistoryPage() {
   // 「見やすく・簡単に絞り込みできるように」の追加分。
   const [dateRangeKey, setDateRangeKey] = useState('all');
   const [searchText, setSearchText] = useState('');
-  // 間取り図の可視化モード。'heatmap'=2Dヒートマップ(既定)、'3d'=3D表示
-  // (さらに下のmode3dで「ヒートマップ」か「棒グラフ」かを選ぶ)。
+  // 間取り図の可視化モード。'heatmap'=2Dヒートマップ(既定)、'3d'=3Dヒートマップ。
+  // 【2026-08-19further変更】「棒グラフは削除してヒートマップのみでよい」という
+  // ご要望を受け、3D表示のときに「ヒートマップ」か「棒グラフ」かを選べる
+  // サブ切り替え(mode3d)は廃止した。3D表示は常にIncidentHeatmap3D(ヒートマップ)
+  // のみを表示する(IncidentBarChart3D.jsxはこのページからは使わなくなったが、
+  // ファイル自体は削除せず残してある)。
   const [mapMode, setMapMode] = useState('heatmap');
-  // 3D表示時のスタイル。'heatmap'=3Dヒートマップ(IncidentHeatmap3D.jsx、既定)、
-  // 'bars'=3D棒グラフ(IncidentBarChart3D.jsx。発生場所ごとの件数をそのまま棒の
-  // 高さで表す)。「3Dのときも棒グラフだけでなくヒートマップに切り替えられるように
-  // してほしい」という要望を受けて追加した(既定はヒートマップ)。
-  const [mode3d, setMode3d] = useState('heatmap');
   // 絞り込みバーの開閉状態。項目が増えて縦に長くなり見づらいという指摘が
   // あったため、既定では折りたたんでおき(件数サマリーとリセットだけは常に見える)、
   // 「絞り込み」ボタンを押したときだけキーワード・期間・種類・エリアの各項目を
@@ -547,9 +545,7 @@ export default function HistoryPage() {
         <section style={s.card}>
           <div style={s.cardHeaderRow}>
             <h3 style={s.h3}>
-              {mapMode === 'heatmap'
-                ? 'ヒートマップ(間取り図)'
-                : (mode3d === 'heatmap' ? '3Dヒートマップ(発生場所別)' : '3D棒グラフ(発生場所別)')}
+              {mapMode === 'heatmap' ? 'ヒートマップ(間取り図)' : '3Dヒートマップ(発生場所別)'}
             </h3>
             {/* 「3Dで見れるように」の要望に対応する2D/3D切り替え。絞り込みバーで
                 絞り込んだ結果(incidents)がどちらの表示にもそのまま反映される。 */}
@@ -569,45 +565,22 @@ export default function HistoryPage() {
             </div>
           </div>
 
-          {/* 3D表示のときだけ、その中で「ヒートマップ」か「棒グラフ」かを選べる
-              サブ切り替えを表示する(既定はヒートマップ)。「3Dのときに棒グラフしか
-              なかった」という指摘への対応。 */}
-          {mapMode === '3d' && (
-            <div style={s.subToggleRow}>
-              <span style={s.subToggleLabel}>3Dの表示形式</span>
-              <div style={s.mapModeToggle}>
-                <button
-                  onClick={() => setMode3d('heatmap')}
-                  style={{ ...s.mapModeBtn, ...(mode3d === 'heatmap' ? s.mapModeBtnActive : {}) }}
-                >
-                  ヒートマップ
-                </button>
-                <button
-                  onClick={() => setMode3d('bars')}
-                  style={{ ...s.mapModeBtn, ...(mode3d === 'bars' ? s.mapModeBtnActive : {}) }}
-                >
-                  棒グラフ
-                </button>
-              </div>
-            </div>
-          )}
-
           <p style={s.desc}>
             {mapMode === 'heatmap' &&
               '色が濃い(赤みが強い)場所ほど、発生回数が多いエリアです。上の絞り込みバーで種類・エリア・期間・キーワードを指定すると、この地図にも即座に反映されます。'}
-            {mapMode === '3d' && mode3d === 'heatmap' &&
+            {mapMode === '3d' &&
               '2Dヒートマップと同じ考え方で、色が濃い場所ほど発生回数が多いエリアです。ドラッグで自由に回転させて立体的に確認できます。'}
-            {mapMode === '3d' && mode3d === 'bars' &&
-              'マス目ごとの発生件数をそのまま棒の高さと色の濃さで表示します。ドラッグで自由に回転させて立体的に確認できます。'}
           </p>
 
           {mapMode === '3d' ? (
             <div style={s.chart3dWrap}>
-              {mode3d === 'heatmap' ? (
-                <IncidentHeatmap3D incidents={incidents} />
-              ) : (
-                <IncidentBarChart3D incidents={incidents} />
-              )}
+              {/* 【2026-08-19further変更】「棒グラフは削除してヒートマップのみで
+                  よい」というご要望を受け、3D表示は常にヒートマップ
+                  (IncidentHeatmap3D)のみを表示する。resetKeyにincidents.lengthを
+                  渡し、絞り込み条件が変わって再描画されるたびにエラー境界の
+                  エラー状態もリセットされるようにしている(「3Dでヒートマップが
+                  表示されない」という不具合報告への対応の一つ)。 */}
+              <IncidentHeatmap3D incidents={incidents} resetKey={incidents.length} />
             </div>
           ) : (
           <svg width={SVG_W} height={SVG_H} viewBox={`0 0 ${SVG_W} ${SVG_H}`} style={s.svg}>
@@ -698,20 +671,18 @@ export default function HistoryPage() {
           </svg>
           )}
 
-          {(mapMode === 'heatmap' || (mapMode === '3d' && mode3d === 'heatmap')) && (
-            <div style={s.legendRow}>
-              <span style={s.legendLabel}>発生密度</span>
-              <span style={s.legendText}>少ない</span>
-              <div style={s.legendGradient} />
-              <span style={s.legendText}>多い</span>
-              {CATEGORIES.map((cat) => (
-                <React.Fragment key={cat.key}>
-                  <span style={s.legendDot(cat.color)} />
-                  <span style={s.legendText}>{cat.label}</span>
-                </React.Fragment>
-              ))}
-            </div>
-          )}
+          <div style={s.legendRow}>
+            <span style={s.legendLabel}>発生密度</span>
+            <span style={s.legendText}>少ない</span>
+            <div style={s.legendGradient} />
+            <span style={s.legendText}>多い</span>
+            {CATEGORIES.map((cat) => (
+              <React.Fragment key={cat.key}>
+                <span style={s.legendDot(cat.color)} />
+                <span style={s.legendText}>{cat.label}</span>
+              </React.Fragment>
+            ))}
+          </div>
           {mapMode === 'heatmap' && incidents.some((i) => i.approx) && (
             <p style={s.approxNote}>
               点線の輪が付いたマーカーは、位置が概算(部屋の中心)であることを示します
@@ -721,8 +692,8 @@ export default function HistoryPage() {
           )}
           {mapMode === '3d' && incidents.some((i) => i.approx) && (
             <p style={s.approxNote}>
-              位置が概算(部屋の中心)の履歴は、発生密度の計算・棒グラフの集計のいずれにも
-              含めていません(カメラキャリブレーション行列が未受領のため。詳細は
+              位置が概算(部屋の中心)の履歴は、発生密度の計算には含めていません
+              (カメラキャリブレーション行列が未受領のため。詳細は
               ROLE_C_SPEC_ALIGNMENT.mdを参照)。
             </p>
           )}
@@ -799,8 +770,8 @@ function makeStyles(theme, isMobile) {
     // 【2026-08-19further変更】「履歴一覧の絞り込みもモーダル化してほしい」という
     // ご要望への対応。InfoButton.jsx/NotificationModal.jsxと同じ「画面中央に
     // 表示する共通モーダル」の見た目・構造をそのまま踏襲している。
-    // 【重要】このページは3D棒グラフ(IncidentBarChart3D.jsx)を持ち、そこでも
-    // @react-three/dreiの<Html>ラベルが既定で非常に大きなzIndex
+    // 【重要】このページは3Dヒートマップ(IncidentHeatmap3D.jsx)を持ち、3D表示
+    // 全般で@react-three/dreiの<Html>ラベルが既定で非常に大きなzIndex
     // (zIndexRange既定値[16777271, 0])を自前で持つため、通常のzIndex:1000
     // のままだと3Dラベルがこのモーダルより手前に表示されてしまう
     // (NotificationModal.jsx/InfoButton.jsxと同じ原因・同じ対処)。
@@ -871,8 +842,6 @@ function makeStyles(theme, isMobile) {
       border: `1px solid ${theme.borderSoft}`, background: theme.panelBgAlt, color: theme.text,
     },
     mapModeToggle: { display: 'flex', gap: 4, flexShrink: 0 },
-    subToggleRow: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 8, marginBottom: 4 },
-    subToggleLabel: { fontSize: 11.5, color: theme.textFaint, fontWeight: 700 },
     mapModeBtn: {
       fontSize: 11.5, padding: '6px 10px', borderRadius: 7, border: `1px solid ${theme.borderSoft}`,
       background: 'transparent', color: theme.textMuted, cursor: 'pointer',
