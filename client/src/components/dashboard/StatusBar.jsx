@@ -50,6 +50,16 @@ export default function StatusBar({
         <span style={s.crumb}>{ROOM_LABEL}</span>
         <span style={s.sep}>・</span>
         <span style={s.crumb}>{CAMERA_LABEL}</span>
+        {/* 【2026-08-19変更】スマホ幅では、下段のボタン行が狭くなりすぎないよう
+            「検出人数」だけはここ(見守りカメラの隣)へ移動する。デスクトップでは
+            従来通りcenter側(下記)に表示するため、ここでは重複しないようisMobile
+            のときだけ出す。 */}
+        {isMobile && (
+          <span style={s.countChip}>
+            <span style={{ ...s.countDot, background: personCount > 0 ? theme.accent : theme.borderSoft }} />
+            検出人数: {personCount || 0}人
+          </span>
+        )}
       </div>
 
       {/* 【2026-08-19追加: スマホ対応】以前はこの中の「接続状態」「検出人数」
@@ -63,40 +73,57 @@ export default function StatusBar({
           center/rightがbar側で個別に折り返す挙動のままにしている。 */}
       <div style={s.scrollRow}>
         <div style={s.center}>
-          <span
-            style={{ ...s.pill, color: pillColor, border: `1px solid ${pillColor}` }}
-            title={isProduction
-              ? 'Role C仕様書 Step 3「MQTT over WebSocketの受信」に対応する、AWS IoT Coreへの実際の接続状態です(本番環境モード)。'
-              : 'Role C仕様書 Step 3「MQTT over WebSocketの受信」の接続状態インジケーターに相当(現状はSocket.IOによるモック接続。デモ用データモード)'}
-          >
-            <span style={{ ...s.dot, background: pillColor }} />
-            {pillText}
-          </span>
+          {/* 【2026-08-19変更】スマホ幅では接続状態ピルは表示しない(狭い画面で
+              優先度が低いため)。デスクトップでは従来通り表示する。 */}
+          {!isMobile && (
+            <span
+              style={{ ...s.pill, color: pillColor, border: `1px solid ${pillColor}` }}
+              title={isProduction
+                ? 'Role C仕様書 Step 3「MQTT over WebSocketの受信」に対応する、AWS IoT Coreへの実際の接続状態です(本番環境モード)。'
+                : 'Role C仕様書 Step 3「MQTT over WebSocketの受信」の接続状態インジケーターに相当(現状はSocket.IOによるモック接続。デモ用データモード)'}
+            >
+              <span style={{ ...s.dot, background: pillColor }} />
+              {pillText}
+            </span>
+          )}
           {/* 本番環境で意図的に空文字を渡している場合(MonitoringDashboard.jsx参照)は、
               空のピルだけが残ってしまわないよう、そもそも描画しない。 */}
           {statusText && <span style={s.stateText}>{statusText}</span>}
-          <span style={s.countChip}>
-            <span style={{ ...s.countDot, background: personCount > 0 ? theme.accent : theme.borderSoft }} />
-            検出人数: {personCount || 0}人
-          </span>
+          {/* 検出人数はスマホ幅では上のパンくず(見守りカメラの隣)へ移したため、
+              ここではデスクトップのときだけ表示する(二重表示を避けるため)。 */}
+          {!isMobile && (
+            <span style={s.countChip}>
+              <span style={{ ...s.countDot, background: personCount > 0 ? theme.accent : theme.borderSoft }} />
+              検出人数: {personCount || 0}人
+            </span>
+          )}
         </div>
 
         <div style={s.right}>
           {import.meta.env.DEV && (
             <>
-              <CameraControls
-                inputMode={inputMode}
-                requestWebcam={requestWebcam}
-                shouldCapture={shouldCapture}
-                cameraError={cameraError}
-              />
+              {/* 【2026-08-19変更】スマホ幅の本番環境では、CameraControlsは
+                  「本番環境(閲覧専用)」という説明バッジしか表示せず(クリックできる
+                  ボタンではない)、狭い画面では場所を取るだけなので非表示にする。
+                  デスクトップでは従来通り表示する。デモ環境モード(Webカメラの
+                  起動/再試行ボタン)はスマホでも引き続き表示する。 */}
+              {!(isMobile && isProduction) && (
+                <>
+                  <CameraControls
+                    inputMode={inputMode}
+                    requestWebcam={requestWebcam}
+                    shouldCapture={shouldCapture}
+                    cameraError={cameraError}
+                  />
+                  <span style={s.rightSep} />
+                </>
+              )}
               {/* 【2026-08-19変更】「本番環境に切り替えたらダミーを置く機能を削除してほしい」
                   というご要望を受け、ダミー関連のUI(配置ボタン・体数チップ・キー操作の
                   ヘルプ・削除ボタン)一式を、本番環境モードでは丸ごと非表示にする。
                   CameraControls(Webカメラの再試行など)は従来通りDEVビルドでは常に表示する。 */}
               {!isProduction && (
                 <>
-                  <span style={s.rightSep} />
                   <button
                     onClick={onAddDummy}
                     style={s.toggleBtn}
@@ -118,31 +145,34 @@ export default function StatusBar({
                       </button>
                     </>
                   )}
+                  <span style={s.rightSep} />
                 </>
               )}
-              <span style={s.rightSep} />
             </>
           )}
+          {/* 【2026-08-19変更】以前は「自由視点」「カメラの視点」の2つのボタンに
+              分かれていたが、3Dプレビュー自体は常にドラッグ操作で自由に視点を
+              動かせる(OrbitControls、RoomScene.jsxのCameraRig参照)。そのため
+              「ボタンで自由視点に固定する」という状態そのものが不要で、
+              「押すとカメラの視点に切り替わり、もう一度押すと元(自由に動かせる
+              状態)に戻る」という1つのトグルボタンに統合した。 */}
           <button
-            onClick={() => onViewModeChange('overview')}
-            style={{ ...s.toggleBtn, ...(viewMode === 'overview' ? s.toggleBtnActive : {}) }}
-          >
-            自由視点
-          </button>
-          <button
-            onClick={() => onViewModeChange('pov')}
+            onClick={() => onViewModeChange(viewMode === 'pov' ? 'overview' : 'pov')}
             style={{ ...s.toggleBtn, ...(viewMode === 'pov' ? s.toggleBtnActive : {}) }}
+            title="押すとカメラが設置位置からの視点に切り替わります。もう一度押すか、3Dプレビューを直接ドラッグすると自由に視点を動かせます。"
           >
-            カメラの視点
+            カメラ視点
           </button>
           <span style={s.rightSep} />
           {/* 「見守りダッシュボードにもヒートマップを表示できるボタンがほしい」
               という要望への対応。既定では非表示にしておき、押すと「危険行為の履歴」
-              タブと同じ考え方の発生密度ヒートマップを床に重ねて表示する。 */}
+              タブと同じ考え方の発生密度ヒートマップを床に重ねて表示する。押すたびに
+              on/offが切り替わるトグルボタン(MonitoringDashboard.jsxのtoggleHeatmap
+              参照)。 */}
           <button
             onClick={onToggleHeatmap}
             style={{ ...s.toggleBtn, ...(heatmapOn ? s.toggleBtnActive : {}) }}
-            title="危険行為の履歴をもとにした発生密度ヒートマップを、部屋の床に重ねて表示します"
+            title="危険行為の履歴をもとにした発生密度ヒートマップを、部屋の床に重ねて表示します(もう一度押すと非表示に戻ります)"
           >
             ヒートマップ
           </button>
