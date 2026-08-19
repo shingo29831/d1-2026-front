@@ -13,8 +13,20 @@ import { footprintBounds, pointInPolygon } from './roomShapes';
 // 部屋のフロア座標(メートル, 部屋中心付近が原点)への簡易マッピングを行うユーティリティ。
 // ===================================================================
 
-const IMG_W = 640;
-const IMG_H = 480;
+let IMG_W = 640;
+let IMG_H = 480;
+
+function updateResolution(x, y) {
+  // 受信した座標からカメラの解像度を動的に推定・更新する
+  if (x > 1920 || y > 1080) {
+    IMG_W = 2560;
+    IMG_H = 1440;
+  } else if (x > 1280 || y > 720) {
+    if (IMG_W < 2560) { IMG_W = 1920; IMG_H = 1080; }
+  } else if (x > 640 || y > 480) {
+    if (IMG_W < 1920) { IMG_W = 1280; IMG_H = 720; }
+  }
+}
 
 function isValidKpt(k) {
   return Array.isArray(k) && k.length >= 3 && k[2] > CONF_THRESHOLD;
@@ -37,6 +49,10 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 
   const xs = visible.map((k) => k[0]);
   const ys = visible.map((k) => k[1]);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  updateResolution(maxX, maxY);
+
   const bbox = {
     minX: Math.min(...xs), maxX: Math.max(...xs),
     minY: Math.min(...ys), maxY: Math.max(...ys),
@@ -387,10 +403,16 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   let smoothedFloor = { x: rawFloor.x, z: rawFloor.z };
   let nextVx = previousState?.vx ?? 0;
   let nextVz = previousState?.vz ?? 0;
+  const now = Date.now();
 
   if (previousState?.floor) {
     const prevFloor = previousState.floor;
-    const dt = 0.3; // 評価間隔の目安(約300ms)
+    // 評価間隔を動的に計算（1秒おきのデータ送信に対応）
+    let dt = 0.3;
+    if (previousState.time) {
+      dt = (now - previousState.time) / 1000;
+      if (dt <= 0 || dt > 3.0) dt = 0.3; // 異常な値の場合はデフォルトに戻す
+    }
 
     // 1. 予測ステップ（現在の速度でそのまま進んだと仮定した位置）
     const predictedX = prevFloor.x + nextVx * dt;
@@ -401,8 +423,9 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
     const ez = rawFloor.z - predictedZ;
     const dist = Math.sqrt(ex * ex + ez * ez);
 
-    // 1.5m以上一気に移動した場合はワープとみなし、平滑化をリセットする（追従を優先）
-    if (dist < 1.5) {
+    // 1秒あたり2.0m以上の移動をワープとみなし、平滑化をリセットする（追従を優先）
+    const warpThreshold = Math.max(1.5, 2.0 * dt);
+    if (dist < warpThreshold) {
       const alpha = 0.4; // 位置の補正ゲイン（高いほど観測値に追従）
       const beta = 0.2;  // 速度の補正ゲイン（高いほど速度変化に敏感）
 
@@ -424,6 +447,7 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
   nextState.floor = smoothedFloor;
   nextState.vx = nextVx;
   nextState.vz = nextVz;
+  nextState.time = now;
 
   return {
     avgConf,
@@ -456,6 +480,7 @@ export function analyzePerson(keypoints, roomConfig, previousState = null) {
 // の仮想平面との交点を計算し、奥行きのズレを解消します。
 // -------------------------------------------------------------------
 export function getRayDirection(imgX, imgY, roomConfig) {
+  updateResolution(imgX, imgY);
   const yawDeg = roomConfig?.cameraYawDeg ?? DEFAULT_YAW_DEG;
   const pitchDeg = roomConfig?.cameraPitchDeg ?? DEFAULT_PITCH_DEG;
   const fovDeg = roomConfig?.cameraFovDeg ?? DEFAULT_FOV_DEG;
@@ -498,7 +523,14 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
   const dir = ray;
   const dirLen = ray.dirLen;
 
-  // 4. レイと指定平面（Y=targetY）の交差判定
+  // カメラの高さとターゲットの高さが近すぎる場合（例: カメラ高0.1mで足首0.1mを狙う）、
+  // 距離が0になってしまうのを防ぐため、ターゲットを床面(0m)にフォールバックする
+  let actualTargetY = targetY;
+  if (Math.abs(cameraMount.y - actualTargetY) < 0.1) {
+    actualTargetY = 0;
+  }
+
+  // 4. レイと指定平面（Y=actualTargetY）の交差判定
   // カメラの高さ(cameraMount.y)から、レイがどれくらいの距離(t、メートル)で
   // 指定の高さに到達するか計算する。
   const footprint = roomConfig?.footprint || DEFAULT_FOOTPRINT;
@@ -534,10 +566,10 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
   // dir.y が負なら下向き。-0.05 は約3度以上下を向いていることを意味する
   const isLookingDown = dir.y < -0.05;
 
-  if (targetY <= 0.5 && isLookingDown) {
+  if (actualTargetY <= 0.5 && isLookingDown) {
     // 足首(0.1)や膝(0.5)が見えていて、かつレイがしっかり下を向いている場合は
     // 床面との交差角度が十分に取れるため、レイキャストが最も正確になる
-    const heightDiff = cameraMount.y - targetY;
+    const heightDiff = cameraMount.y - actualTargetY;
     if (heightDiff * dir.y < 0) {
       floorDistanceM = -heightDiff / dir.y;
       isAccurateRaycast = true; // キャリブレーションの学習に使える信頼できる値
@@ -551,8 +583,8 @@ export function imageToFloor(imgX, imgY, roomConfig, targetY = 0, isCloseUp = fa
     if (estimatedDistanceM !== null) {
       floorDistanceM = estimatedDistanceM * dirLen;
     } else {
-      const heightDiff = cameraMount.y - targetY;
-      // カメラの高さと対象(targetY)の高さが近い場合、レイが水平に近くなる(dir.yが0に近い)と
+      const heightDiff = cameraMount.y - actualTargetY;
+      // カメラの高さと対象(actualTargetY)の高さが近い場合、レイが水平に近くなる(dir.yが0に近い)と
       // 距離が無限遠に飛んでしまう(ゼロ除算に近い状態)のを防ぐため、角度が浅すぎる場合は除外する。
       if (Math.abs(dir.y) > 0.05 && (heightDiff * dir.y < 0)) {
         floorDistanceM = -heightDiff / dir.y;
