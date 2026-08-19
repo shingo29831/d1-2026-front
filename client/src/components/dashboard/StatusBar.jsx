@@ -48,12 +48,18 @@ export default function StatusBar({
           このページ固有の文脈(どの部屋・どのカメラを見ているか)だけを示す。 */}
       <div style={s.left}>
         <span style={s.crumb}>{ROOM_LABEL}</span>
-        <span style={s.sep}>・</span>
-        <span style={s.crumb}>{CAMERA_LABEL}</span>
+        {/* 【2026-08-19変更】スマホ幅では「・見守りカメラ」の部分が折り返して
+            見づらくなっていたため非表示にする(カメラは1台のみのため、部屋名だけで
+            文脈は十分伝わる)。デスクトップでは従来通り表示する。 */}
+        {!isMobile && (
+          <>
+            <span style={s.sep}>・</span>
+            <span style={s.crumb}>{CAMERA_LABEL}</span>
+          </>
+        )}
         {/* 【2026-08-19変更】スマホ幅では、下段のボタン行が狭くなりすぎないよう
-            「検出人数」だけはここ(見守りカメラの隣)へ移動する。デスクトップでは
-            従来通りcenter側(下記)に表示するため、ここでは重複しないようisMobile
-            のときだけ出す。 */}
+            「検出人数」だけはここへ移動する。デスクトップでは従来通りcenter側
+            (下記)に表示するため、ここでは重複しないようisMobileのときだけ出す。 */}
         {isMobile && (
           <span style={s.countChip}>
             <span style={{ ...s.countDot, background: personCount > 0 ? theme.accent : theme.borderSoft }} />

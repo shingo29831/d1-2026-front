@@ -531,40 +531,18 @@ export default function MonitoringDashboard({
             showHeatmap={showHeatmap}
             heatmapIncidents={heatmapIncidents}
             riskSuggestions={riskSuggestions}
+            // 【2026-08-19追加】「カメラ視点」ボタンを押した後にユーザーが3Dプレビューを
+            // 直接ドラッグして視点を動かしたら、ボタンのハイライトを解除するため、
+            // 自由視点(overview)へ戻す。RoomScene.jsx側のCameraRig(OrbitControlsの
+            // onStart)から、ユーザー操作由来のときだけ呼ばれる。
+            onUserOrbit={() => setViewMode('overview')}
           />
           {selectedDummyId && <KeyLegendOverlay items={keyLegendItems} flashKey={flashKey} />}
-          
-          {/* AIリスクサジェストUI */}
-          {riskSuggestions.length > 0 && (
-            <div style={{
-              position: 'absolute',
-              top: 16,
-              left: 16,
-              background: theme.surface || 'rgba(255, 255, 255, 0.9)',
-              border: `1px solid ${theme.border || '#ccc'}`,
-              borderRadius: '8px',
-              padding: '12px',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-              zIndex: 10,
-              maxWidth: isMobile ? 'calc(100vw - 64px)' : '320px',
-              pointerEvents: 'none'
-            }}>
-              <h4 style={{ margin: '0 0 8px 0', color: theme.warning || '#f59e0b', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <i className="fa-solid fa-lightbulb"></i>
-                AIリスクサジェスト
-              </h4>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                {riskSuggestions.slice(0, 3).map(s => (
-                  <div key={s.id} style={{ fontSize: '13px', color: theme.text || '#333' }}>
-                    <div style={{ fontWeight: 'bold' }}>{s.label}</div>
-                    <div style={{ fontSize: '11px', color: theme.textMuted || '#666' }}>
-                      {new Date(s.time).toLocaleString()}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
+          {/* 【2026-08-19変更】以前はここ(3Dシーンの上)に「AIリスクサジェスト」を
+              浮かせて表示していたが、「危険通知とAIリスクサジェストで分けて表示して
+              ほしい」というご要望を受け、右側(スマホでは下側)のNotificationPanel内の
+              別セクションへ移した(riskSuggestionsをそのまま渡すだけでよい)。 */}
 
           {/* デモ時のWebカメラ映像表示UI */}
           {shouldCapture && (
@@ -621,6 +599,7 @@ export default function MonitoringDashboard({
           onAck={acknowledgeNotification}
           onDismiss={dismissNotification}
           onClearAll={clearAll}
+          riskSuggestions={riskSuggestions}
         />
       </div>
     </div>
