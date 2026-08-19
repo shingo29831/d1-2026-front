@@ -123,18 +123,27 @@ export default function NotificationPanel({ notifications, onAck, onDismiss, onC
 
 function makeStyles(theme, isMobile) {
   return {
+    // 【2026-08-19further変更】「危険通知の部分は個々の領域だけ確保して
+    // その領域内でスクロールできるように」というご要望への対応。以前は
+    // 高さを320pxに決め打ちしていたが、3Dシーン(55vh)+ヘッダー類の高さ
+    // 次第ではこの320px自体が画面からはみ出してしまい、パネル全体を見る
+    // ためにページ側もスクロールが必要になってしまっていた(スクロールが
+    // 二重になって分かりにくい不具合)。固定pxの代わりにflex:1で「3D
+    // シーンの下に残っている分だけ」を自分の領域として確保するようにし、
+    // その確保した領域の中だけでスクロールする(親のbody(MonitoringDashboard.jsx)
+    // がflexDirection:'column'なので、シーンの高さを引いた残り全部がここに来る)。
+    // minHeightは、万一シーンがとても高い機種でもヘッダー+最低限1件分は
+    // 見えるようにするための下限。
     panel: isMobile
       ? {
         width: '100%',
-        flexShrink: 0,
+        flex: 1,
+        minHeight: 160,
         borderLeft: 'none',
         borderTop: `1px solid ${theme.border}`,
         background: theme.panelBgAlt,
         display: 'flex',
         flexDirection: 'column',
-        // 縦積み時は画面いっぱいの高さを取ると3Dシーンが見えなくなるため、
-        // ここだけスクロールする決め打ちの高さにしておく。
-        height: 320,
       }
       : {
         width: 320,
@@ -148,7 +157,11 @@ function makeStyles(theme, isMobile) {
     // 【2026-08-19追加】危険通知・AIリスクサジェストの2セクションをまとめて
     // 1本のスクロール領域にする(片方だけが伸び縮みして表示が崩れるのを防ぐため、
     // panel直下ではなくこの中でflex:1+overflowY:'auto'を持たせる)。
-    scrollArea: { flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' },
+    // minHeight:0が無いと、flexアイテムは既定でコンテンツの高さぶんまで
+    // 広がろうとしてしまい(flexboxの既定min-height:auto)、通知件数が
+    // 多いときにこの領域自体が確保した高さを超えて伸びてしまう
+    // (=親のpanelごと画面からはみ出す)不具合の原因になるため明示している。
+    scrollArea: { flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' },
     header: {
       display: 'flex',
       alignItems: 'center',
