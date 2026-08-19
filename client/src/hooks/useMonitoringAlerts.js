@@ -29,7 +29,7 @@ const HAZARD_MARKER_LIFETIME_MS = 15000;
  * を検出し、動画のUIのような通知リストを生成する。
  */
 export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage) {
-  const { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, zones, doorSensors } = useRoomConfig();
+  const { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution, zones, doorSensors } = useRoomConfig();
   const [notifications, setNotifications] = useState([]);
   const [statusText, setStatusText] = useState('待機中');
   const [primaryPerson, setPrimaryPerson] = useState(null);
@@ -72,14 +72,14 @@ export function useMonitoringAlerts(poseData, lastPoseAt, connected, iotMessage)
   // カメラの向きと、実際に人物が表示される位置がズレる」不具合の原因になって
   // いた(向き(yaw)自体は反映されるが、上下角度・視野角の設定が無視される
   // ため、特に上下角度がずれるほど検出位置の誤差が大きくなる)。
-  const roomConfigRef = useRef({ footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg });
+  const roomConfigRef = useRef({ footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution });
   const zonesRef = useRef(zones);
   useEffect(() => { poseDataRef.current = poseData; }, [poseData]);
   useEffect(() => { lastPoseAtRef.current = lastPoseAt; }, [lastPoseAt]);
   useEffect(() => { connectedRef.current = connected; }, [connected]);
   useEffect(() => {
-    roomConfigRef.current = { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg };
-  }, [footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg]);
+    roomConfigRef.current = { footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution };
+  }, [footprint, cameraMount, cameraYawDeg, cameraPitchDeg, cameraFovDeg, cameraResolution]);
   useEffect(() => { zonesRef.current = zones; }, [zones]);
 
   // 【重要】戻り値として、実際に通知が発生した場合のみそのidを返す

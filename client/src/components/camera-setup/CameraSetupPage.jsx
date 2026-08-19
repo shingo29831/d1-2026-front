@@ -5,7 +5,6 @@ import { useTheme } from '../../themeContext';
 import { footprintBounds, nearestEdgePoint, normalToYawDeg, yawDegToDir } from '../../roomShapes';
 import { useViewport } from '../../hooks/useViewport';
 import InfoButton from '../common/InfoButton';
-import { CAMERA_RESOLUTIONS } from '../../config';
 
 const SVG_W = 560;
 const SVG_H = 420;
@@ -176,10 +175,14 @@ export default function CameraSetupPage() {
     setDraftRange(Number(value));
   };
 
-  const handleResolutionChange = (value) => {
+  const handleResolutionWidthChange = (value) => {
     setSaved(false);
-    const res = CAMERA_RESOLUTIONS.find(r => `${r.width}x${r.height}` === value);
-    if (res) setDraftResolution(res);
+    setDraftResolution((prev) => ({ ...prev, width: Number(value) }));
+  };
+
+  const handleResolutionHeightChange = (value) => {
+    setSaved(false);
+    setDraftResolution((prev) => ({ ...prev, height: Number(value) }));
   };
 
   const handleSave = () => {
@@ -346,17 +349,23 @@ export default function CameraSetupPage() {
 
             <div style={s.fieldRow}>
               <span style={s.fieldLabel}>解像度</span>
-              <select
-                value={`${draftResolution.width}x${draftResolution.height}`}
-                onChange={(e) => handleResolutionChange(e.target.value)}
-                style={s.select}
-              >
-                {CAMERA_RESOLUTIONS.map(r => (
-                  <option key={`${r.width}x${r.height}`} value={`${r.width}x${r.height}`}>{r.label}</option>
-                ))}
-              </select>
+              <div style={s.resolutionInputs}>
+                <input
+                  type="number" min={100} max={8000} step={1}
+                  value={draftResolution.width}
+                  onChange={(e) => handleResolutionWidthChange(e.target.value)}
+                  style={s.numberInput}
+                />
+                <span style={s.resolutionCross}>x</span>
+                <input
+                  type="number" min={100} max={8000} step={1}
+                  value={draftResolution.height}
+                  onChange={(e) => handleResolutionHeightChange(e.target.value)}
+                  style={s.numberInput}
+                />
+              </div>
             </div>
-            <p style={s.hint}>実際のカメラの解像度に合わせて設定してください。解像度が異なると距離の計算がずれる原因になります。</p>
+            <p style={s.hint}>実際のカメラの解像度(幅x高さ)をピクセル単位で入力してください。解像度が異なると距離の計算がずれる原因になります。</p>
 
             <div style={s.fieldRow}>
               <span style={s.fieldLabel}>高さ</span>
@@ -443,7 +452,9 @@ function makeStyles(theme, isMobile) {
     fieldRow: { display: 'flex', alignItems: 'center', gap: 10, marginTop: 16 },
     fieldLabel: { width: 48, fontSize: 13.5, color: theme.textMuted },
     range: { flex: 1 },
-    select: { flex: 1, padding: '6px 8px', borderRadius: 6, border: `1px solid ${theme.borderSoft}`, background: theme.panelBg, color: theme.text },
+    resolutionInputs: { flex: 1, display: 'flex', alignItems: 'center', gap: 6 },
+    numberInput: { width: 70, padding: '6px 8px', borderRadius: 6, border: `1px solid ${theme.borderSoft}`, background: theme.panelBg, color: theme.text, textAlign: 'center', fontSize: 13.5 },
+    resolutionCross: { color: theme.textMuted, fontSize: 13 },
     unit: { fontSize: 13, color: theme.accent, width: 48, textAlign: 'right' },
     btnRow: { display: 'flex', gap: 10, marginTop: 16 },
     primaryBtn: { padding: '10px 18px', fontSize: 13.5, fontWeight: 700, background: theme.accent, color: theme.mode === 'dark' ? '#04222a' : '#ffffff', border: `1px solid ${theme.accentBorder}`, borderRadius: 8, cursor: 'pointer' },

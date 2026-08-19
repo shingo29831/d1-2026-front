@@ -12,7 +12,6 @@ import {
   DEFAULT_ZONES,
   DEFAULT_WALLS,
   DEFAULT_DOOR_SENSORS,
-  CAMERA_RESOLUTIONS,
   DEFAULT_CAMERA_RESOLUTION,
 } from './config';
 import { footprintBounds } from './roomShapes';

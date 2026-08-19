@@ -132,13 +132,7 @@ export const CAMERA_RANGE_M = 5;
 
 // カメラの解像度設定。高解像度のカメラ映像から座標が送られてくる場合、
 // 正しいパース計算のために実際の解像度を指定する必要があります。
-export const CAMERA_RESOLUTIONS = [
-  { label: '640x480 (VGA)', width: 640, height: 480 },
-  { label: '1280x720 (HD)', width: 1280, height: 720 },
-  { label: '1920x1080 (FHD)', width: 1920, height: 1080 },
-  { label: '2560x1440 (QHD)', width: 2560, height: 1440 },
-];
-export const DEFAULT_CAMERA_RESOLUTION = CAMERA_RESOLUTIONS[0];
+export const DEFAULT_CAMERA_RESOLUTION = { width: 640, height: 480 };
 
 // -------------------------------------------------------------------
 // 【身長ベースの距離補正機能について(2026-08-18に撤去)】単眼カメラ+床平面
