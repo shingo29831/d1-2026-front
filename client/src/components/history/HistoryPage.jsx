@@ -4,7 +4,7 @@ import { useTheme } from '../../themeContext';
 import { useOperationMode } from '../../operationModeContext';
 import { useViewport } from '../../hooks/useViewport';
 import { footprintBounds, footprintCenter, footprintEdges, pointInPolygon } from '../../roomShapes';
-import { isInsideZone } from '../../poseGeometry';
+import { isInsideZone, imageToFloor } from '../../poseGeometry';
 import { getIncidentsSortedDesc, CATEGORIES, GROUPS } from '../../incidentHistory';
 import { fetchIncidentsSortedDesc } from '../../historyApi';
 import IncidentHeatmap3D from './IncidentHeatmap3D';
@@ -81,7 +81,7 @@ function formatRelative(iso, nowMs) {
 // (画面上部にどちらを表示しているかの案内が出る)。将来的には
 // useMonitoringAlerts.jsの通知をそのままAPI側に蓄積していく形を想定。
 export default function HistoryPage() {
-  const { footprint, walls, zones } = useRoomConfig();
+  const { footprint, walls, zones, cameraMount, cameraYawDeg } = useRoomConfig();
   const { theme } = useTheme();
   const { isProduction } = useOperationMode();
   const { isMobile } = useViewport();
@@ -131,19 +131,35 @@ export default function HistoryPage() {
     return () => { cancelled = true; };
   }, [isProduction]);
 
-  // historyApi.js経由の実データは、位置(x, z)が不明な項目(現状の"ai_hazard"等
-  // すべて。画像上のピクセル座標しか無く、カメラキャリブレーション行列が
-  // 未受領のため床座標に変換できていない)が x: null, z: null で返ってくる。
+  // historyApi.js経由の実データは、位置(x, z)が不明な項目(現状"ai_hazard"等の
+  // 多くがこれに該当。画像上のピクセル座標しか無く、カメラキャリブレーション
+  // 行列が未受領のため床座標に変換できていない)が x: null, z: null で返ってくる。
   // そのままでは間取り図上に描けないため、ここで部屋の中心に概算配置し、
   // approx: true を付けておく(一覧・ヒートマップ側で「概算」と明示する)。
+  //
+  // 【2026-08-19further変更・不具合修正】「危険行為履歴のヒートマップが、見守り
+  // ダッシュボードのヒートマップと違ってほとんど何も表示されない」という報告
+  // への対応。原因は、AIリスクサジェスト(risk_suggestion)には実はピクセル座標
+  // (rawX, rawY)が付いており、見守りダッシュボード側(MonitoringDashboard.jsx の
+  // heatmapIncidents)ではそれをimageToFloor()でカメラの設置位置・向きから床座標
+  // へ変換し、approx: false(=密度計算に含める)として扱っていたが、この履歴
+  // ページ側は同じ変換をしておらず、AIリスクサジェストも一律approx: trueの
+  // 部屋中心固定にしてしまい、密度計算(incidentHeatmap.js)から除外されていた
+  // ため。ダッシュボード側と全く同じ変換ロジックをここにも適用する。
   const roomCenter = useMemo(() => footprintCenter(footprint), [footprint]);
   const allIncidents = useMemo(
-    () => historyState.incidents.map((i) => (
-      i.x === null || i.x === undefined || i.z === null || i.z === undefined
+    () => historyState.incidents.map((i) => {
+      if (i.type === 'risk_suggestion' && i.rawX != null && i.rawY != null) {
+        const floorPos = imageToFloor(i.rawX, i.rawY, { footprint, cameraMount, cameraYawDeg });
+        // APIから返るradius(ピクセル単位)をメートル単位に近似変換する(例: 100px = 1m)。
+        const radiusM = i.radius ? Math.min(Math.max(i.radius / 100, 0.5), 2.0) : 1.0;
+        return { ...i, x: floorPos.x, z: floorPos.z, radius: radiusM, approx: false };
+      }
+      return i.x === null || i.x === undefined || i.z === null || i.z === undefined
         ? { ...i, x: roomCenter.x, z: roomCenter.z, approx: true }
-        : i
-    )),
-    [historyState.incidents, roomCenter],
+        : i;
+    }),
+    [historyState.incidents, roomCenter, footprint, cameraMount, cameraYawDeg],
   );
   // nowMs: ページを開いた時刻(以後は固定)。期間フィルター('過去24時間'等)の
   // 起点、および履歴一覧の相対時刻表示(formatRelative)の両方で使う。
